@@ -144,6 +144,7 @@ export function createPlayerIntroAudio({
             }
           } else if (
             event.data === window.YT.PlayerState.PAUSED &&
+            player.getPlayerState() === window.YT.PlayerState.PAUSED &&
             getRoom()?.phase === "playing"
           ) {
             activating = true;

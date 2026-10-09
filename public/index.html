@@ -66,6 +66,15 @@
         </div>
       </section>
       <section id="room" hidden>
+        <div
+          id="connectionNotice"
+          class="connection-notice"
+          role="status"
+          hidden
+        >
+          <span id="connectionMessage"></span>
+          <button id="reconnect" class="quiet">再接続</button>
+        </div>
         <section id="hostScreen" aria-label="運営画面" hidden>
           <section
             id="hostRuleStrip"
@@ -219,6 +228,7 @@
                       id="playlistUrl"
                       placeholder="https://www.youtube.com/playlist?list=..." /></label
                   ><button id="playlist">プレイリストを取り込む</button>
+                  <p id="playlistStatus" class="hint" role="status"></p>
                   <p class="hint">
                     公開・限定公開リストに対応。答えは各動画のタイトルから自動設定します。
                   </p>

@@ -6,6 +6,7 @@ import { parse } from "csv-parse/sync";
 import { fileURLToPath } from "node:url";
 import { fetchYouTubeTitle, youtubeVideoId } from "./youtube.js";
 import { evaluateGame, lifeLossForJudgment, ruleNames } from "./rules.js";
+import { fetchYouTubePlaylist, youtubePlaylistId } from "./playlist.js";
 
 export function questionsFromCsv(text) {
   const rows = parse(text.replace(/^\uFEFF/, ""), {
@@ -39,11 +40,35 @@ const defaultSettings = {
 };
 const soundTypes = new Set(["bell", "pop", "arcade", "none"]);
 
-export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
+export function createApp({
+  fetchVideoTitle = fetchYouTubeTitle,
+  fetchPlaylist = fetchYouTubePlaylist,
+  roomIdleTtlMs = 12 * 60 * 60 * 1000,
+  cleanupIntervalMs = 60000,
+} = {}) {
   const app = express();
   const http = createServer(app);
   const io = new Server(http, { maxHttpBufferSize: 512000 });
   const rooms = new Map();
+  const sessions = new Map();
+  const identityRoom = (id) => `anonymous:${id}`;
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [code, room] of rooms) {
+      if (room.idleSince && now - room.idleSince >= roomIdleTtlMs)
+        rooms.delete(code);
+    }
+    for (const [token, session] of sessions) {
+      if (
+        !session.socketIds.size &&
+        !rooms.has(session.code) &&
+        now - session.lastSeen > 7 * 24 * 60 * 60 * 1000
+      )
+        sessions.delete(token);
+    }
+  }, cleanupIntervalMs);
+  cleanupTimer.unref();
+  http.on("close", () => clearInterval(cleanupTimer));
   const titleCache = new Map();
   const metadataUpdates = new Map();
   function refreshGame(r, keepFinished = false) {
@@ -166,15 +191,37 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
     };
   }
   function broadcast(r) {
+    r.idleSince = [...r.players.values()].some((p) => p.online)
+      ? null
+      : r.idleSince || Date.now();
     for (const p of r.players.values())
-      io.to(p.id).emit("state", state(r, p.id === r.hostId));
+      io.to(identityRoom(p.id)).emit("state", state(r, p.id === r.hostId));
   }
   io.on("connection", (socket) => {
-    let code;
-    const get = () => rooms.get(code);
+    const suppliedToken = socket.handshake.auth?.sessionToken;
+    let session =
+      typeof suppliedToken === "string" && /^[\w-]{43}$/.test(suppliedToken)
+        ? sessions.get(suppliedToken)
+        : undefined;
+    if (!session) {
+      session = {
+        id: socket.id,
+        token: randomBytes(32).toString("base64url"),
+        socketIds: new Set(),
+        code: undefined,
+        lastSeen: Date.now(),
+      };
+      sessions.set(session.token, session);
+    }
+    const participantId = session.id;
+    session.socketIds.add(socket.id);
+    session.lastSeen = Date.now();
+    socket.join(identityRoom(participantId));
+    const get = () => rooms.get(session.code);
     const host = () => {
       const r = get();
-      if (!r || r.hostId !== socket.id) throw Error("司会者のみ操作できます");
+      if (!r || r.hostId !== participantId)
+        throw Error("司会者のみ操作できます");
       return r;
     };
     const reset = (r) => {
@@ -188,11 +235,18 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
     };
     const leave = () => {
       const r = get();
-      if (!r) return;
-      r.players.delete(socket.id);
-      socket.leave(code);
-      if (r.hostId === socket.id) r.hostId = [...r.players.keys()][0];
-      if (!r.players.size) rooms.delete(code);
+      if (!r) {
+        session.code = undefined;
+        return;
+      }
+      r.players.delete(participantId);
+      for (const id of session.socketIds)
+        io.sockets.sockets.get(id)?.leave(r.code);
+      if (r.hostId === participantId)
+        r.hostId =
+          [...r.players.values()].find((p) => p.online)?.id ||
+          [...r.players.keys()][0];
+      if (!r.players.size) rooms.delete(r.code);
       else {
         refreshGame(r, true);
         if (r.game.status === "finished" && r.phase === "playing") {
@@ -201,13 +255,15 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
         }
         broadcast(r);
       }
-      code = undefined;
+      session.code = undefined;
+      io.to(identityRoom(participantId)).emit("left", { code: r.code });
     };
     const on = (name, fn) =>
       socket.on(name, async (data = {}, ack = () => {}) => {
         try {
-          await fn(data);
-          ack({ ok: true });
+          const result = await fn(data);
+          session.lastSeen = Date.now();
+          ack({ ok: true, ...result });
         } catch (e) {
           ack({ ok: false, error: e.message });
         }
@@ -216,11 +272,15 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
       if (!["button", "intro", "normal"].includes(mode))
         throw Error("モードが不正です");
       leave();
-      code = randomBytes(3).toString("hex").toUpperCase();
+      let code;
+      do {
+        code = randomBytes(3).toString("hex").toUpperCase();
+      } while (rooms.has(code));
+      session.code = code;
       const r = {
         code,
         mode,
-        hostId: socket.id,
+        hostId: participantId,
         players: new Map(),
         questions: [],
         index: 0,
@@ -231,8 +291,8 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
         hadCompetition: false,
       };
       reset(r);
-      r.players.set(socket.id, {
-        id: socket.id,
+      r.players.set(participantId, {
+        id: participantId,
         name: String(name || "司会").slice(0, 24),
         score: 0,
         online: true,
@@ -245,17 +305,24 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
     on("join", ({ name, code: next }) => {
       const r = rooms.get(String(next).trim().toUpperCase());
       if (!r) throw Error("部屋が見つかりません");
+      if (session.code === r.code && r.players.has(participantId)) {
+        r.players.get(participantId).online = true;
+        socket.join(r.code);
+        broadcast(r);
+        return;
+      }
       if (r.players.size >= 30) throw Error("部屋は満員です");
       leave();
-      code = r.code;
-      r.players.set(socket.id, {
-        id: socket.id,
+      session.code = r.code;
+      r.players.set(participantId, {
+        id: participantId,
         name: String(name || "ゲスト").slice(0, 24),
         score: 0,
         online: true,
         spectator: r.game.status === "finished",
       });
-      socket.join(code);
+      for (const id of session.socketIds)
+        io.sockets.sockets.get(id)?.join(r.code);
       if (
         [...r.players.values()].filter((p) => p.id !== r.hostId && !p.spectator)
           .length >= 2
@@ -265,6 +332,30 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
       broadcast(r);
     });
     on("leave", leave);
+    on("resume", () => {
+      const r = get(),
+        p = r?.players.get(participantId);
+      if (!p)
+        throw Error(
+          "保存された部屋がありません。部屋を作り直すか参加してください",
+        );
+      p.online = true;
+      socket.join(r.code);
+      broadcast(r);
+    });
+    const previousRoom = get();
+    const previousPlayer = previousRoom?.players.get(participantId);
+    if (!previousPlayer) session.code = undefined;
+    socket.emit("session", {
+      id: participantId,
+      token: session.token,
+      roomCode: session.code || null,
+    });
+    if (previousPlayer) {
+      previousPlayer.online = true;
+      socket.join(previousRoom.code);
+      broadcast(previousRoom);
+    }
     on("import", ({ csv, questions }) => {
       const r = host();
       const qs = csv ? questionsFromCsv(String(csv)) : questions;
@@ -302,6 +393,7 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
       });
       if (!response.ok) throw Error("取得できません。シートを公開してください");
       const body = await response.text();
+      if (host() !== r) throw Error("部屋が切り替わりました");
       if (body.length > 512000) throw Error("シートが大きすぎます");
       const qs = questionsFromCsv(body);
       if (!qs.length) throw Error("問題がありません");
@@ -311,6 +403,49 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
       reset(r);
       enrichTitles(r);
       broadcast(r);
+    });
+    on("playlist", async ({ url }) => {
+      const r = host();
+      if (r.mode !== "intro") throw Error("イントロクイズのみ使用できます");
+      if (r.phase === "playing")
+        throw Error("クイズを止めてから取り込んでください");
+      if (!youtubePlaylistId(url))
+        throw Error("YouTubeのプレイリストURL（list=…）を入力してください");
+      if (r.playlistLoading) throw Error("プレイリストを取り込み中です");
+      r.playlistLoading = true;
+      const roundId = r.roundId,
+        questions = r.questions;
+      try {
+        const result = await fetchPlaylist(url);
+        if (
+          host() !== r ||
+          r.roundId !== roundId ||
+          r.questions !== questions ||
+          r.phase === "playing"
+        )
+          throw Error(
+            "部屋・問題が切り替わったため取り込みを中止しました。再試行してください",
+          );
+        if (
+          !Array.isArray(result.questions) ||
+          !result.questions.length ||
+          result.questions.length > 500
+        )
+          throw Error("動画一覧を取得できません");
+        r.questions = result.questions;
+        r.index = 0;
+        r.round = 1;
+        reset(r);
+        enrichTitles(r);
+        broadcast(r);
+        return {
+          count: r.questions.length,
+          skipped: result.skipped || 0,
+          truncated: !!result.truncated,
+        };
+      } finally {
+        r.playlistLoading = false;
+      }
     });
     on("retryTitles", () => {
       const r = host();
@@ -367,23 +502,24 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
     on("buzz", ({ sound = "bell", roundId } = {}) => {
       const r = get();
       if (!r) throw Error("部屋に参加してください");
-      if (r.hostId === socket.id) throw Error("運営は早押しに参加できません");
+      if (r.hostId === participantId)
+        throw Error("運営は早押しに参加できません");
       if (
         r.game.status === "finished" ||
-        r.players.get(socket.id)?.status !== "active"
+        r.players.get(participantId)?.status !== "active"
       )
         throw Error("このゲームでは回答できません");
       if (roundId && roundId !== r.roundId)
         throw Error("ラウンドが切り替わりました");
-      if (r.buzzes.some((b) => b.id === socket.id)) return;
+      if (r.buzzes.some((b) => b.id === participantId)) return;
       if (!["playing", "buzzed"].includes(r.phase) || r.revealed)
         throw Error("まだ受付していません");
       if (r.phase === "buzzed" && !r.settings.recordAllBuzzes)
         throw Error("このラウンドは先着1人のみです");
       const ms = Date.now() - r.startedAt;
       r.buzzes.push({
-        id: socket.id,
-        name: r.players.get(socket.id).name,
+        id: participantId,
+        name: r.players.get(participantId).name,
         ms,
         sound:
           r.settings.allowPlayerSound && soundTypes.has(sound) ? sound : "none",
@@ -517,7 +653,19 @@ export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
       p.score += delta;
       broadcast(r);
     });
-    socket.on("disconnect", leave);
+    socket.on("disconnect", () => {
+      session.socketIds.delete(socket.id);
+      session.lastSeen = Date.now();
+      const r = get(),
+        p = r?.players.get(participantId);
+      if (!p || session.socketIds.size) return;
+      p.online = false;
+      if (r.hostId === participantId && r.phase === "playing") {
+        r.elapsed = Date.now() - r.startedAt;
+        r.phase = "paused";
+      }
+      broadcast(r);
+    });
   });
   return { app, http, io, rooms };
 }

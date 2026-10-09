@@ -9,7 +9,19 @@ import {
 } from "./game-ui.js";
 
 const $ = (id) => document.getElementById(id);
-const socket = io();
+function storedSession() {
+  try {
+    return JSON.parse(localStorage.getItem("quiz-anonymous-session")) || {};
+  } catch {
+    return {};
+  }
+}
+let participantId = storedSession().id,
+  restoring = true,
+  disconnectedElapsed = null;
+const socket = io({
+  auth: (done) => done({ sessionToken: storedSession().token }),
+});
 let state,
   player,
   ytReady = false,
@@ -34,16 +46,18 @@ const modeNames = {
   button: "早押しボタンのみ",
   normal: "ノーマルクイズ",
 };
-const host = () => state?.hostId === socket.id;
+const host = () => !!state && state.hostId === participantId;
 const contestants = () => state.players.filter((p) => p.id !== state.hostId);
-const myBuzz = () => state?.buzzes.find((b) => b.id === socket.id);
+const myBuzz = () => state?.buzzes.find((b) => b.id === participantId);
 const inSession = () =>
-  socket.connected && state?.players.some((p) => p.id === socket.id);
+  socket.connected &&
+  !restoring &&
+  state?.players.some((p) => p.id === participantId);
 const canBuzz = () =>
   inSession() &&
   !host() &&
   state.game.status !== "finished" &&
-  state.players.find((p) => p.id === socket.id)?.status === "active" &&
+  state.players.find((p) => p.id === participantId)?.status === "active" &&
   !state.revealed &&
   (state.phase === "playing" ||
     (state.phase === "buzzed" && state.settings.recordAllBuzzes)) &&
@@ -56,18 +70,25 @@ function toast(message) {
   clearTimeout(toastTimeout);
   toastTimeout = setTimeout(() => ($("toast").style.display = "none"), 4500);
 }
-function send(event, data = {}) {
+function request(event, data = {}, timeout = 12000) {
+  if (!socket.connected || restoring) {
+    toast("再接続を待ってから操作してください");
+    return Promise.resolve(null);
+  }
   return new Promise((resolve) =>
-    socket.timeout(12000).emit(event, data, (error, result) => {
+    socket.timeout(timeout).emit(event, data, (error, result) => {
       if (error) {
         toast("通信がタイムアウトしました");
-        resolve(false);
-      } else if (!result.ok) {
-        toast(result.error);
-        resolve(false);
-      } else resolve(true);
+        resolve(null);
+      } else if (!result?.ok) {
+        toast(result?.error || "通信に失敗しました");
+        resolve(null);
+      } else resolve(result);
     }),
   );
+}
+async function send(event, data = {}) {
+  return !!(await request(event, data));
 }
 function videoId(url) {
   try {
@@ -98,6 +119,11 @@ function element(tag, className, text) {
   return node;
 }
 function setPhase(id) {
+  if (!inSession()) {
+    $(id).textContent = "再接続中";
+    $(id).dataset.phase = "paused";
+    return;
+  }
   $(id).textContent =
     state.game.status === "finished"
       ? "ゲーム終了"
@@ -114,16 +140,24 @@ function roundLabel() {
     : `QUESTION ${state.count ? state.index + 1 : 0} / ${state.count}`;
 }
 function updateConnection() {
-  document.body.dataset.connected = String(socket.connected);
+  const connected = socket.connected && !restoring;
+  document.body.dataset.connected = String(connected);
   document
     .querySelectorAll(".connection")
     .forEach(
-      (node) =>
-        (node.textContent = socket.connected ? "オンライン" : "オフライン"),
+      (node) => (node.textContent = connected ? "オンライン" : "再接続中…"),
     );
+  const hostOffline =
+    state?.players.find((p) => p.id === state.hostId)?.online === false;
+  $("connectionNotice").hidden = !state || (connected && !hostOffline);
+  $("connectionMessage").textContent = !connected
+    ? "再接続中です。元の席・得点を保持しています。"
+    : "運営の再接続を待っています。";
+  $("reconnect").hidden = connected;
 }
 function showLobby(code = "") {
   state = null;
+  disconnectedElapsed = null;
   pendingPlay = pendingBuzz = false;
   player?.stopVideo();
   lastVideo = "";
@@ -137,6 +171,7 @@ function showLobby(code = "") {
     $("joinTab").click();
     $("code").value = code;
   }
+  updateConnection();
 }
 $("name").value = localStorage.getItem("quiz-name") || "";
 function name() {
@@ -260,9 +295,15 @@ $("start").onclick = () => {
     lastVideo = id;
     player.loadVideoById({
       videoId: id,
-      startSeconds: state.question.start || 0,
+      startSeconds:
+        (state.question.start || 0) +
+        (state.phase === "paused" ? state.elapsed / 1000 : 0),
     });
-  } else player.playVideo();
+  } else {
+    if (state.phase === "paused")
+      player.seekTo((state.question.start || 0) + state.elapsed / 1000, true);
+    player.playVideo();
+  }
 };
 $("csv").onchange = async (e) => {
   const file = e.target.files[0];
@@ -313,49 +354,44 @@ $("sample").onclick = () => {
       .then((r) => r.text())
       .then((csv) => importQuestions({ csv }));
 };
-$("playlist").onclick = () => {
-  let list;
-  try {
-    list = new URL($("playlistUrl").value).searchParams.get("list");
-  } catch {}
-  if (!list || !/^[-\w]+$/.test(list)) {
+$("playlist").onclick = async () => {
+  const url = $("playlistUrl").value.trim();
+  if (!url) {
     toast("プレイリストURLを入力してください");
     return;
   }
-  if (!player || !ytReady) {
-    toast("YouTubeの読み込み完了後に再試行してください");
-    return;
-  }
+  if (playlistLoading || !inSession()) return;
   if (state.phase === "playing") {
     toast("クイズを止めてから取り込んでください");
     return;
   }
   playlistLoading = true;
   pendingPlay = false;
-  player.cuePlaylist({ listType: "playlist", list, index: 0 });
-  let attempts = 0;
-  const poll = setInterval(async () => {
-    const ids = player.getPlaylist();
-    if (ids?.length) {
-      clearInterval(poll);
-      playlistLoading = false;
-      await importQuestions({
-        questions: ids.slice(0, 500).map((id, i) => ({
-          title: `曲 ${i + 1}`,
-          answer: "",
-          url: `https://www.youtube.com/watch?v=${id}`,
-          start: 0,
-        })),
-      });
-      toast(
-        `${ids.length}曲を取り込みました。答えを動画タイトルから自動設定します`,
-      );
-    } else if (++attempts >= 20) {
-      clearInterval(poll);
-      playlistLoading = false;
-      toast("リストを取得できません。公開設定を確認するかCSVを使ってください");
+  $("playlist").disabled = true;
+  $("playlist").textContent = "取り込み中…";
+  $("playlistStatus").textContent =
+    "YouTubeから動画一覧とタイトルを取得しています…";
+  renderHostControls();
+  const wasDirty = editorDirty;
+  editorDirty = false;
+  try {
+    const result = await request("playlist", { url }, 45000);
+    if (!result) {
+      editorDirty = wasDirty;
+      $("playlistStatus").textContent =
+        "取り込めませんでした。エラーを確認して再試行してください。";
+      return;
     }
-  }, 500);
+    $("playlistStatus").textContent =
+      `${result.count}曲を取り込みました。${result.truncated ? "上限の500曲まで取り込んでいます。" : ""}${result.skipped ? `非公開・削除済みなど${result.skipped}曲は除外しました。` : ""}`;
+    toast(`${result.count}曲を取り込み、動画タイトルを答えに設定しました`);
+  } finally {
+    playlistLoading = false;
+    $("playlist").disabled = false;
+    $("playlist").textContent = "プレイリストを取り込む";
+    if (host()) renderHostControls();
+    prepareIntroTitle();
+  }
 };
 const customization = createBuzzerCustomization({
   getRoom: () => state,
@@ -516,6 +552,7 @@ function renderHostControls() {
   const connected = inSession();
   $("start").disabled =
     !connected ||
+    playlistLoading ||
     pendingPlay ||
     state.game.status === "finished" ||
     state.revealed ||
@@ -533,6 +570,7 @@ function renderHostControls() {
       : "早押し受付を開始";
   $("next").disabled =
     !connected ||
+    playlistLoading ||
     state.game.status === "finished" ||
     (state.mode !== "button" && state.index + 1 >= state.count);
   $("nextHint").textContent =
@@ -604,13 +642,16 @@ function renderHost(s, prev) {
       card.dataset.first = String(rank === 1);
       card.dataset.rule = s.settings.rule;
       card.dataset.status = p.status;
+      card.dataset.online = String(p.online);
       const top = element("div", "score-card-top");
       top.append(
         element("span", "score-card-name", p.name),
         element(
           "span",
           "score-rank",
-          statusText(p, s.settings) || (rank ? `${rank}番` : "待機"),
+          !p.online
+            ? "接続待ち"
+            : statusText(p, s.settings) || (rank ? `${rank}番` : "待機"),
         ),
       );
       if (s.settings.rule !== "points")
@@ -667,26 +708,28 @@ function renderHost(s, prev) {
 }
 function renderBuzzer() {
   const mine = myBuzz();
-  const rank = state.buzzes.findIndex((b) => b.id === socket.id) + 1;
-  const me = state.players.find((p) => p.id === socket.id);
+  const rank = state.buzzes.findIndex((b) => b.id === participantId) + 1;
+  const me = state.players.find((p) => p.id === participantId);
   const inactive = me?.status !== "active" || state.game.status === "finished";
   $("buzz").disabled = !canBuzz();
   $("buzzerDock").dataset.buzzed = String(!!mine);
-  $("buzzLabel").textContent = inactive
-    ? statusText(me, state.settings) || "ゲーム終了"
-    : mine
-      ? "押下済み！"
-      : pendingBuzz
-        ? "送信中…"
-        : canBuzz()
-          ? customization.preferences.text
-          : state.revealed
-            ? "答え公開中"
-            : state.phase === "paused"
-              ? "一時停止"
-              : state.phase === "buzzed"
-                ? "受付終了"
-                : "スタンバイ";
+  $("buzzLabel").textContent = !inSession()
+    ? "再接続中"
+    : inactive
+      ? statusText(me, state.settings) || "ゲーム終了"
+      : mine
+        ? "押下済み！"
+        : pendingBuzz
+          ? "送信中…"
+          : canBuzz()
+            ? customization.preferences.text
+            : state.revealed
+              ? "答え公開中"
+              : state.phase === "paused"
+                ? "一時停止"
+                : state.phase === "buzzed"
+                  ? "受付終了"
+                  : "スタンバイ";
   $("myRank").textContent = mine ? `あなたは ${rank} 番` : "YOUR BUZZER";
   $("buzzStatus").textContent = !inSession()
     ? "接続待ち"
@@ -707,7 +750,7 @@ function renderBuzzer() {
               : "運営の開始を待っています";
 }
 function renderPlayer(s) {
-  const me = s.players.find((p) => p.id === socket.id);
+  const me = s.players.find((p) => p.id === participantId);
   $("myName").textContent = me?.name || "プレイヤー";
   $("myScore").textContent = me?.score ?? "—";
   $("timerDisplay").hidden = !s.settings.showTimer;
@@ -739,20 +782,23 @@ function renderPlayer(s) {
       const b = s.buzzes[index];
       const card = element("article", "podium");
       card.dataset.playerId = p.id;
-      card.dataset.self = String(p.id === socket.id);
+      card.dataset.self = String(p.id === participantId);
       card.dataset.buzzed = String(!!b);
       card.dataset.first = String(index === 0);
       card.dataset.status = p.status;
+      card.dataset.online = String(p.online);
       const top = element("div", "podium-top");
       card.dataset.rule = s.settings.rule;
       top.append(
         element(
           "span",
           "podium-order",
-          statusText(p, s.settings) || (b ? `${index + 1} 番` : "待機中"),
+          !p.online
+            ? "接続待ち"
+            : statusText(p, s.settings) || (b ? `${index + 1} 番` : "待機中"),
         ),
       );
-      if (p.id === socket.id)
+      if (p.id === participantId)
         top.append(element("span", "self-badge", "あなた"));
       const body = element("div", "podium-body");
       const score = element("div", "podium-score", p.score ?? "—");
@@ -776,24 +822,82 @@ function renderPlayer(s) {
   renderBuzzer();
 }
 socket.on("connect", () => {
+  restoring = true;
   updateConnection();
-  if (state && !inSession()) showLobby(state.code);
+});
+socket.on("session", (session) => {
+  participantId = session.id;
+  localStorage.setItem(
+    "quiz-anonymous-session",
+    JSON.stringify({ id: session.id, token: session.token }),
+  );
+  if (!session.roomCode) {
+    restoring = false;
+    const previousCode = state?.code || localStorage.getItem("quiz-last-room");
+    if (previousCode) {
+      localStorage.removeItem("quiz-last-room");
+      showLobby(previousCode);
+      toast("以前の部屋は終了しています。部屋を作るか参加してください");
+    }
+    updateConnection();
+  }
+});
+socket.on("left", () => {
+  localStorage.removeItem("quiz-last-room");
+  restoring = false;
+  showLobby();
 });
 socket.on("disconnect", () => {
+  if (state && disconnectedElapsed === null)
+    disconnectedElapsed =
+      state.phase === "playing"
+        ? Math.max(0, Date.now() + clockOffset - state.startedAt)
+        : state.elapsed || 0;
+  restoring = true;
   updateConnection();
   pendingPlay = pendingBuzz = false;
   player?.pauseVideo();
-  playerIntroAudio.reset();
+  playerIntroAudio.sync();
   musicVisualizer.render();
   if (state) {
-    if (host()) renderHostControls();
-    else renderBuzzer();
+    if (host()) renderHost(state, state);
+    else {
+      renderBuzzer();
+      setPhase("playerPhase");
+    }
   }
-  toast("接続が切れました。再接続後、部屋に入り直してください");
+  $("toast").style.display = "none";
+});
+socket.on("connect_error", updateConnection);
+function reconnect() {
+  if (!socket.connected) {
+    socket.connect();
+    return;
+  }
+  if (!state || restoring) return;
+  socket.timeout(5000).emit("resume", {}, (error, result) => {
+    if (error) {
+      socket.disconnect();
+      socket.connect();
+    } else if (!result?.ok) {
+      localStorage.removeItem("quiz-last-room");
+      showLobby();
+      toast(result?.error || "部屋は終了しています");
+    }
+  });
+}
+$("reconnect").onclick = reconnect;
+window.addEventListener("online", reconnect);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) reconnect();
 });
 socket.on("state", (s) => {
   const prev = state;
   state = s;
+  restoring = false;
+  disconnectedElapsed = null;
+  localStorage.setItem("quiz-last-room", s.code);
+  updateConnection();
   clockOffset = s.serverNow - Date.now();
   customization.playNewBuzzes(s, prev);
   const isHost = host();
@@ -806,7 +910,7 @@ socket.on("state", (s) => {
   history.replaceState(null, "", "/?room=" + s.code);
   if (isHost) renderHost(s, prev);
   else renderPlayer(s);
-  renderGameRule(s, socket.id);
+  renderGameRule(s, participantId);
   if (prev && prev.code !== s.code) playerIntroAudio.reset();
   playerIntroAudio.sync();
   musicVisualizer.render();
@@ -829,6 +933,7 @@ socket.on("state", (s) => {
 function reportIntroTitle() {
   if (
     !host() ||
+    !inSession() ||
     state.mode !== "intro" ||
     state.question?.titleStatus === "ready" ||
     !player?.getVideoData
@@ -849,6 +954,7 @@ function reportIntroTitle() {
 function prepareIntroTitle() {
   if (
     !host() ||
+    !inSession() ||
     state.mode !== "intro" ||
     !ytReady ||
     !player?.cueVideoById ||
@@ -878,6 +984,8 @@ function ensureYouTube() {
           prepareIntroTitle();
         },
         onStateChange: async (e) => {
+          if (!inSession()) return;
+          if (player.getPlayerState() !== e.data) return;
           reportIntroTitle();
           if ([YT.PlayerState.PLAYING, YT.PlayerState.CUED].includes(e.data))
             setTimeout(reportIntroTitle, 300);
@@ -902,7 +1010,7 @@ function ensureYouTube() {
           toast(
             "YouTube動画を再生できません。埋め込み許可やURLを確認してください",
           );
-          if (state?.phase === "playing") send("pause");
+          if (inSession() && host() && state.phase === "playing") send("pause");
         },
       },
     });
@@ -928,9 +1036,10 @@ window.onYouTubeIframeAPIReady = () => {
 function tick() {
   if (state) {
     const ms =
-      state.phase === "playing"
+      disconnectedElapsed ??
+      (state.phase === "playing"
         ? Math.max(0, Date.now() + clockOffset - state.startedAt)
-        : state.elapsed || 0;
+        : state.elapsed || 0);
     const text = (ms / 1000).toFixed(3);
     $(host() ? "hostTimer" : "playerTimer").textContent = text;
   }
