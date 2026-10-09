@@ -1,4 +1,5 @@
 import { createBuzzerCustomization } from "./buzzer.js";
+import { createPlayerIntroAudio } from "./intro-audio.js";
 
 const $ = (id) => document.getElementById(id);
 const socket = io();
@@ -111,6 +112,7 @@ function showLobby(code = "") {
   pendingPlay = pendingBuzz = false;
   player?.stopVideo();
   lastVideo = "";
+  playerIntroAudio.reset();
   document.body.dataset.screen = "lobby";
   $("lobby").hidden = false;
   $("room").hidden = true;
@@ -321,6 +323,13 @@ const customization = createBuzzerCustomization({
   getRoom: () => state,
   toast,
 });
+const playerIntroAudio = createPlayerIntroAudio({
+  getRoom: () => state,
+  isPlayer: () => inSession() && !host(),
+  getClockOffset: () => clockOffset,
+  videoId,
+  requestApi: requestYouTubeApi,
+});
 window.addEventListener("buzzer-preferences", () => {
   if (state && !host()) renderBuzzer();
 });
@@ -344,6 +353,7 @@ for (const dialog of document.querySelectorAll("dialog")) {
 }
 const settingNames = [
   "allowPlayerSound",
+  "allowPlayerMusic",
   "recordAllBuzzes",
   "showTimer",
   "showScores",
@@ -355,6 +365,11 @@ $("openRoomSettings").onclick = () => {
     if ($(key).type === "checkbox") $(key).checked = state.settings[key];
     else $(key).value = state.settings[key];
   }
+  $("allowPlayerMusic").disabled = state.mode !== "intro";
+  $("playerMusicSettingNote").textContent =
+    state.mode === "intro"
+      ? "各プレイヤーが音声を有効にすると、再生・停止が連動します"
+      : "イントロクイズで使用できます";
   $("roomSettingsDialog").showModal();
 };
 $("roomSettingsForm").onsubmit = async (e) => {
@@ -647,6 +662,7 @@ socket.on("disconnect", () => {
   updateConnection();
   pendingPlay = pendingBuzz = false;
   player?.pauseVideo();
+  playerIntroAudio.reset();
   if (state) {
     if (host()) renderHostControls();
     else renderBuzzer();
@@ -667,6 +683,8 @@ socket.on("state", (s) => {
   history.replaceState(null, "", "/?room=" + s.code);
   if (isHost) renderHost(s, prev);
   else renderPlayer(s);
+  if (prev && prev.code !== s.code) playerIntroAudio.reset();
+  playerIntroAudio.sync();
   if (player && (s.phase !== "playing" || !isHost) && !pendingPlay)
     player.pauseVideo();
   if (
@@ -720,16 +738,25 @@ function ensureYouTube() {
         },
       },
     });
-  } else if (!document.getElementById("yt-api")) {
+  } else requestYouTubeApi();
+}
+function requestYouTubeApi() {
+  if (!document.getElementById("yt-api")) {
     const script = document.createElement("script");
     script.id = "yt-api";
     script.src = "https://www.youtube.com/iframe_api";
-    script.onerror = () =>
+    script.onerror = () => {
+      script.remove();
+      playerIntroAudio.onApiError();
       toast("YouTubeに接続できません。通信設定を確認してください");
+    };
     document.head.append(script);
   }
 }
-window.onYouTubeIframeAPIReady = ensureYouTube;
+window.onYouTubeIframeAPIReady = () => {
+  ensureYouTube();
+  playerIntroAudio.onApiReady();
+};
 function tick() {
   if (state) {
     const ms =

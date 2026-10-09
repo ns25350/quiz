@@ -24,6 +24,7 @@ export function questionsFromCsv(text) {
 }
 const defaultSettings = {
   allowPlayerSound: true,
+  allowPlayerMusic: false,
   showTimer: true,
   showScores: true,
   recordAllBuzzes: true,
@@ -69,7 +70,10 @@ export function createApp() {
               r.mode === "intro" && !host && !r.revealed
                 ? "曲名を当ててください"
                 : q.title,
-            url: r.mode === "intro" ? q.url : "",
+            url:
+              r.mode === "intro" && (host || r.settings.allowPlayerMusic)
+                ? q.url
+                : "",
             start: q.start,
             answer: host || r.revealed ? q.answer : "",
           }

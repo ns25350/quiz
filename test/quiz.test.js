@@ -2,6 +2,92 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { io as client } from "socket.io-client";
 import { createApp, questionsFromCsv } from "../server.js";
+
+test(
+  "intro music permission controls video access independently of buzz sounds",
+  { timeout: 10000 },
+  async (t) => {
+    const { http, io } = createApp();
+    await new Promise((r) => http.listen(0, "127.0.0.1", r));
+    const url = `http://127.0.0.1:${http.address().port}`;
+    const operator = client(url),
+      player = client(url),
+      late = client(url);
+    t.after(async () => {
+      for (const s of [operator, player, late]) s.disconnect();
+      await new Promise((r) => io.close(r));
+    });
+    await Promise.all(
+      [operator, player, late].map(
+        (s) => new Promise((r) => s.on("connect", r)),
+      ),
+    );
+    let u = next(operator);
+    await emit(operator, "create", { name: "運営", mode: "intro" });
+    const { code } = await u;
+    await emit(player, "join", { name: "参加者", code });
+    u = next(player, (s) => s.count === 2);
+    await emit(operator, "import", {
+      questions: [
+        {
+          title: "曲1",
+          answer: "秘密の曲名",
+          url: "https://youtu.be/jNQXAC9IVRw",
+          start: 12,
+        },
+        {
+          title: "曲2",
+          answer: "別の曲名",
+          url: "https://youtu.be/abcdefghijk",
+          start: 5,
+        },
+      ],
+    });
+    let s = await u;
+    assert.equal(s.settings.allowPlayerMusic, false);
+    assert.equal(s.question.url, "");
+    assert.equal(
+      (await emit(player, "settings", { settings: { allowPlayerMusic: true } }))
+        .ok,
+      false,
+    );
+    u = next(player, (s) => s.settings.allowPlayerMusic);
+    await emit(operator, "settings", {
+      settings: { allowPlayerMusic: true, allowPlayerSound: false },
+    });
+    s = await u;
+    assert.equal(s.question.url, "https://youtu.be/jNQXAC9IVRw");
+    assert.equal(s.question.answer, "");
+    assert.equal(s.question.start, 12);
+    u = next(player, (s) => s.phase === "playing");
+    await emit(operator, "start");
+    const playing = await u;
+    u = next(late, (s) => s.phase === "playing");
+    await emit(late, "join", { name: "途中参加", code });
+    s = await u;
+    assert.equal(s.startedAt, playing.startedAt);
+    assert.equal(s.roundId, playing.roundId);
+    assert.equal(s.question.url, playing.question.url);
+    u = next(player, (s) => !s.settings.allowPlayerMusic);
+    await emit(operator, "settings", { settings: { allowPlayerMusic: false } });
+    s = await u;
+    assert.equal(s.phase, "playing");
+    assert.equal(s.startedAt, playing.startedAt);
+    assert.equal(s.question.url, "");
+    u = next(operator, (s) => s.phase === "buzzed");
+    await emit(player, "buzz", { sound: "bell", roundId: playing.roundId });
+    s = await u;
+    assert.equal(s.buzzes[0].sound, "none");
+    assert.equal(s.question.url, "https://youtu.be/jNQXAC9IVRw");
+    u = next(player, (s) => s.index === 1);
+    await emit(operator, "next");
+    s = await u;
+    assert.notEqual(s.roundId, playing.roundId);
+    assert.equal(s.phase, "ready");
+    assert.equal(s.question.url, "");
+    assert.equal(s.elapsed, 0);
+  },
+);
 const emit = (s, event, data = {}) =>
   new Promise((resolve) => s.emit(event, data, resolve));
 const next = (s, predicate = () => true) =>

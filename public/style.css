@@ -18,6 +18,15 @@ body {
   margin: 0;
   color: var(--ink);
   background: var(--bg);
+  scrollbar-color: var(--border) var(--bg);
+}
+::selection {
+  background: var(--purple);
+  color: #22223b;
+}
+input,
+textarea {
+  caret-color: var(--mint);
 }
 body::before {
   content: "";
@@ -106,7 +115,7 @@ h2 {
 }
 .kicker {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 2px;
   font-weight: 800;
 }
@@ -179,7 +188,7 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 2px;
 }
 .lobby-form {
@@ -203,7 +212,7 @@ h2 {
   color: #292340;
 }
 .connection {
-  font-size: 10px;
+  font-size: 11px;
 }
 .status-dot {
   display: inline-flex;
@@ -525,7 +534,7 @@ body[data-connected="false"] .status-dot::before {
 }
 .score-value small {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--muted);
   letter-spacing: 2px;
@@ -554,7 +563,7 @@ body[data-connected="false"] .status-dot::before {
 }
 .judgment-buttons small {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 4px;
   font-weight: 500;
 }
@@ -612,7 +621,7 @@ body[data-connected="false"] .status-dot::before {
   font-weight: 700;
 }
 .imports-tile summary span {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
   margin-left: 16px;
   font-weight: 400;
@@ -685,9 +694,72 @@ body[data-screen="player"] main {
   font-variant-numeric: tabular-nums;
 }
 .my-score span {
-  font-size: 8px;
+  font-size: 11px;
   color: var(--muted);
   letter-spacing: 1px;
+}
+.player-music-area {
+  flex-shrink: 0;
+  background: var(--panel);
+  border-radius: 22px;
+  padding: 18px 24px;
+  margin-bottom: 20px;
+}
+.player-music-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.player-music-controls h2 {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+#playerMusicStatus {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.player-music-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.player-music-actions button {
+  min-height: 44px;
+}
+.player-music-playback {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 16px;
+}
+.player-music-playback iframe {
+  width: 240px;
+  height: 200px;
+  flex-shrink: 0;
+  border: 0;
+}
+.player-music-info {
+  max-width: 440px;
+  flex: 1;
+  min-width: 0;
+}
+.player-music-info label {
+  margin: 0 0 10px;
+}
+.player-music-info output {
+  float: right;
+  font-variant-numeric: tabular-nums;
+}
+#playerMusicVolume {
+  accent-color: var(--mint);
+  padding: 0;
+  height: 36px;
+}
+body[data-screen="player"][data-music-enabled="true"] main {
+  height: max(100dvh, 920px);
 }
 .player-playfield {
   flex: 1;
@@ -832,7 +904,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
 }
 .podium-order {
   color: var(--muted);
@@ -842,7 +914,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
   color: var(--seat-accent);
 }
 .self-badge {
-  font-size: 9px;
+  font-size: 11px;
   background: #c1f29b1a;
   color: var(--mint);
   border-radius: 5px;
@@ -876,7 +948,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
   font-variant-numeric: tabular-nums;
 }
 .podium-score small {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--muted);
   margin-left: 3px;
@@ -884,7 +956,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
 .podium-time {
   min-height: 16px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .podium-light {
@@ -939,7 +1011,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
 }
 #myRank {
   color: var(--mint);
-  font-size: 10px;
+  font-size: 11px;
 }
 .buzz {
   --buzz-rgb: 193, 242, 155;
@@ -1019,7 +1091,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
   margin-top: 12px;
   text-align: center;
   color: #c1c2d5;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 1px;
   text-shadow: 0 1px 4px #151725;
 }
@@ -1146,6 +1218,10 @@ body[data-player-layout="stacked"] .player-stage .timer {
 .setting-row input[type="checkbox"]:checked::before {
   background: #2d3a31;
   transform: translateX(20px);
+}
+.setting-row input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .settings-dialog input[type="range"] {
   padding: 0;
@@ -1303,7 +1379,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
     right: 18px;
   }
   .action-tile small {
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.7;
   }
   .secondary-controls {
@@ -1338,7 +1414,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
     margin: 10px 0 0;
   }
   .tile-heading > .kicker {
-    font-size: 8px;
+    font-size: 11px;
     letter-spacing: 1px;
   }
   .player-hud {
@@ -1363,10 +1439,52 @@ body[data-player-layout="stacked"] .player-stage .timer {
     font-size: 24px;
   }
   .my-score span {
-    font-size: 7px;
+    font-size: 11px;
   }
   .player-playfield {
     gap: 12px;
+  }
+  .player-music-area {
+    padding: 16px;
+    border-radius: 18px;
+    margin-bottom: 12px;
+  }
+  .player-music-controls {
+    align-items: center;
+    gap: 10px;
+  }
+  .player-music-controls > div:first-child {
+    min-width: 0;
+  }
+  .player-music-actions {
+    max-width: 136px;
+  }
+  .player-music-playback {
+    align-items: center;
+    gap: 12px;
+  }
+  .player-music-playback iframe {
+    width: 200px;
+  }
+  .player-music-info {
+    width: auto;
+  }
+  .player-music-info output {
+    display: block;
+    float: none;
+    margin-top: 4px;
+  }
+  #playerMusicHelp {
+    font-size: 11px;
+  }
+  body[data-screen="player"][data-music-enabled="true"] main {
+    height: max(100dvh, 920px);
+  }
+  body[data-music-enabled="true"] .player-stage .timer-display {
+    order: -1;
+    flex: 0 0 auto;
+    margin: 0 0 16px;
+    min-height: 70px;
   }
   .player-stage {
     padding: 16px 12px var(--buzzer-reserve, 200px);
@@ -1377,10 +1495,10 @@ body[data-player-layout="stacked"] .player-stage .timer {
     gap: 8px;
   }
   .stage-top .phase {
-    font-size: 10px;
+    font-size: 11px;
   }
   .stage-top .hint {
-    font-size: 9px;
+    font-size: 11px;
   }
   .player-stage h1 {
     font-size: 14px;
@@ -1397,7 +1515,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
   }
   .player-stage .kicker {
     letter-spacing: 1px;
-    font-size: 8px;
+    font-size: 11px;
   }
   .player-answer {
     font-size: 13px;
@@ -1405,7 +1523,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
   .player-winner {
     margin-top: 12px;
     padding: 10px;
-    font-size: 10px;
+    font-size: 11px;
   }
   .podium-section {
     padding: 16px 10px 0;
@@ -1420,7 +1538,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
     font-size: 13px;
   }
   #playerCount {
-    font-size: 9px;
+    font-size: 11px;
   }
   .podium-grid {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
@@ -1447,7 +1565,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
     line-height: 1.2;
   }
   .podium-time {
-    font-size: 9px;
+    font-size: 11px;
     min-height: 12px;
   }
   .buzzer-dock {
@@ -1461,10 +1579,10 @@ body[data-player-layout="stacked"] .player-stage .timer {
   }
   .buzzer-info {
     max-width: calc(100vw - 40px);
-    font-size: 10px;
+    font-size: 11px;
   }
   .buzzer-help {
-    font-size: 8px;
+    font-size: 11px;
   }
   .settings-dialog {
     padding: 22px 18px;
@@ -1502,6 +1620,20 @@ body[data-player-layout="stacked"] .player-stage .timer {
   .score-card-bottom button {
     width: 40px;
     height: 40px;
+  }
+}
+@media (max-width: 380px) {
+  .player-music-playback {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .player-music-info {
+    flex-basis: 100%;
+  }
+  .player-music-info output {
+    display: inline;
+    float: right;
+    margin-top: 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {

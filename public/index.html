@@ -168,7 +168,7 @@
                 <span class="kicker">INTRO PLAYER</span>
                 <h2>運営側の音声プレイヤー</h2>
                 <p class="hint">
-                  実際の再生開始にタイマーが連動。早押しで自動停止します。同室で遊ぶか、通話で音声を共有してください。
+                  実際の再生開始にタイマーが連動。早押しで自動停止します。運営の設定で、プレイヤー端末でも曲を再生できます。
                 </p>
               </div>
               <div id="player"></div>
@@ -254,6 +254,51 @@
               </button>
             </div>
           </div>
+          <section
+            id="playerMusicArea"
+            class="player-music-area"
+            aria-label="イントロの音声"
+            hidden
+          >
+            <div class="player-music-controls">
+              <div>
+                <h2>イントロ音声</h2>
+                <p id="playerMusicStatus" role="status">
+                  この端末でも曲を聞けます。
+                </p>
+              </div>
+              <div class="player-music-actions">
+                <button id="enablePlayerMusic" class="primary">
+                  この端末で聞く</button
+                ><button
+                  id="mutePlayerMusic"
+                  class="quiet"
+                  hidden
+                  aria-pressed="false"
+                >
+                  ミュート
+                </button>
+              </div>
+            </div>
+            <div id="playerMusicPlayback" class="player-music-playback" hidden>
+              <div id="listenerPlayer"></div>
+              <div class="player-music-info">
+                <label
+                  >曲の音量 <output id="musicVolumeValue">60%</output
+                  ><input
+                    id="playerMusicVolume"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value="60"
+                /></label>
+                <p id="playerMusicHelp" class="hint">
+                  再生が始まらない場合は「再生を有効にする」か、YouTubeの再生ボタンを押してください。
+                </p>
+              </div>
+            </div>
+          </section>
           <div id="playerPlayfield" class="player-playfield">
             <article class="player-stage">
               <div class="stage-top">
@@ -329,6 +374,14 @@
               ><b>プレイヤーの効果音</b
               ><small>早押しで選んだ音を鳴らすことを許可</small></span
             ><input id="allowPlayerSound" type="checkbox"
+          /></label>
+          <label class="setting-row"
+            ><span
+              ><b>プレイヤー端末でイントロ曲を再生</b
+              ><small id="playerMusicSettingNote"
+                >各プレイヤーが音声を有効にして参加できます</small
+              ></span
+            ><input id="allowPlayerMusic" type="checkbox"
           /></label>
           <label class="setting-row"
             ><span
