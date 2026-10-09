@@ -2,157 +2,278 @@
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>ポン！ | みんなで早押しクイズ</title>
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#151725" />
+    <title>ポン！ | 早押しゲーム</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <header>
-      <a href="/" class="logo">ポン！<span>QUIZ ROOM</span></a
-      ><span id="connection">接続中…</span>
-    </header>
     <main>
-      <section id="lobby">
-        <div class="hero">
-          <span class="eyebrow">音楽も、知識も、反射神経も。</span>
-          <h1>わかった瞬間、<br /><em>ポン！</em>と押そう。</h1>
-          <p>
-            部屋をつくって、仲間と早押し。<br />お気に入りの曲でイントロクイズをはじめよう。
-          </p>
-          <div class="tags">
-            <span>🎵 イントロクイズ</span><span>⚡ 早押しボタン</span
-            ><span>💡 ノーマルクイズ</span>
+      <section id="lobby" class="lobby">
+        <div class="lobby-intro">
+          <span class="kicker">READY TO PLAY?</span>
+          <h1>ポン<span>！</span></h1>
+          <p class="lobby-message">ひらめいたら、<br />誰よりも早く。</p>
+          <div class="lobby-tags">
+            <span>INTRO</span><span>QUIZ</span><span>BUZZER</span>
           </div>
         </div>
-        <div class="card lobby-card">
+        <div class="tile lobby-form">
           <label
-            >あなたの名前<input
+            >プレイヤー名 / 運営名<input
               id="name"
               maxlength="24"
-              placeholder="例：クイズ太郎"
-              value=""
+              placeholder="あなたの名前"
+              autocomplete="nickname"
           /></label>
-          <div class="tabs">
-            <button id="createTab" class="selected">部屋をつくる</button
-            ><button id="joinTab">部屋に入る</button>
+          <div class="tabs" role="group" aria-label="参加方法">
+            <button id="createTab" class="selected" aria-pressed="true">
+              運営する
+            </button>
+            <button id="joinTab" aria-pressed="false">参加する</button>
           </div>
           <div id="createForm">
             <label
-              >遊び方<select id="mode">
-                <option value="intro">🎵 イントロクイズ</option>
-                <option value="button">⚡ 早押しボタンのみ</option>
-                <option value="normal">💡 ノーマルクイズ</option>
+              >ゲームモード<select id="mode">
+                <option value="intro">イントロクイズ</option>
+                <option value="button">早押しボタンのみ</option>
+                <option value="normal">ノーマルクイズ</option>
               </select></label
             >
-            <p class="muted">
-              作った人が司会者になります。参加者は部屋コードで参加できます。
-            </p>
-            <button id="create" class="primary full">部屋をつくる →</button>
+            <p class="hint">あなたは運営席へ。仲間を招待してはじめよう。</p>
+            <button id="create" class="primary full">
+              ルームをつくる <span>↗</span>
+            </button>
           </div>
           <div id="joinForm" hidden>
             <label
-              >部屋コード<input
+              >ルームコード<input
                 id="code"
                 placeholder="6桁のコード"
-                maxlength="6" /></label
-            ><button id="join" class="primary full">部屋に入る →</button>
+                maxlength="6"
+                autocapitalize="characters"
+                spellcheck="false"
+            /></label>
+            <p class="hint">あなた専用の早押しボタンと回答台で参加。</p>
+            <button id="join" class="primary full">
+              ゲームに参加 <span>↗</span>
+            </button>
           </div>
+          <span class="connection hint">接続中…</span>
         </div>
       </section>
       <section id="room" hidden>
-        <div class="room-top">
-          <div>
-            <span class="eyebrow" id="modeLabel"></span>
-            <h2>ROOM <span id="roomCode"></span></h2>
-          </div>
-          <div>
-            <button id="copy">招待リンクをコピー</button
-            ><button id="leave">退出</button>
-          </div>
-        </div>
-        <div class="game-grid">
-          <div>
-            <article class="card game">
-              <div class="game-meta">
-                <span id="progress"></span
-                ><span id="phase" class="badge"></span>
+        <section id="hostScreen" aria-label="運営画面" hidden>
+          <div class="host-grid">
+            <article class="tile session-tile">
+              <div class="tile-heading">
+                <span class="kicker">CONTROL ROOM</span
+                ><span class="connection status-dot">接続中…</span>
               </div>
-              <h2 id="question">準備しましょう</h2>
-              <div id="timer">00.000<span>SECONDS</span></div>
-              <div id="winner"></div>
-              <button id="buzz" class="buzz">
-                早押し！<small>SPACE / タップ</small>
+              <h1>運営ルーム</h1>
+              <div class="room-code" id="roomCode"></div>
+              <div class="session-meta">
+                <span id="modeLabel"></span
+                ><span><b id="hostPlayerCount">0</b> 人参加</span>
+              </div>
+              <div class="utility-buttons">
+                <button id="copy">招待リンク ↗</button
+                ><button id="hostLeave" class="quiet">退出</button>
+              </div>
+            </article>
+            <article class="tile question-tile">
+              <div class="tile-heading">
+                <span class="kicker" id="hostProgress">ROUND 01</span
+                ><button id="openImports" class="quiet">問題を準備 ＋</button>
+              </div>
+              <h2 id="hostQuestion">ゲームの準備をしよう</h2>
+              <p id="hostAnswer" class="host-answer" hidden></p>
+              <span class="hint" id="hostQuestionHint"
+                >問題を取り込んでから開始できます。</span
+              >
+            </article>
+            <article class="tile clock-tile">
+              <span id="hostPhase" class="phase" data-phase="ready"
+                >スタンバイ</span
+              >
+              <div id="hostTimer" class="timer">0.000</div>
+              <span class="kicker">SECONDS</span>
+            </article>
+            <button id="start" class="tile action-tile start-tile" disabled>
+              <span class="action-icon" aria-hidden="true">▶</span
+              ><span id="startLabel">スタート</span
+              ><small id="startHint">早押し受付を開始</small>
+            </button>
+            <button id="next" class="tile action-tile next-tile" disabled>
+              <span class="action-icon" aria-hidden="true">↗</span
+              ><span>次へ</span><small id="nextHint">次のラウンドを準備</small>
+            </button>
+            <article class="tile secondary-controls">
+              <button id="pause">
+                <span aria-hidden="true">Ⅱ</span> 一時停止</button
+              ><button id="reset">
+                <span aria-hidden="true">↺</span> このラウンドをリセット</button
+              ><button id="reveal">
+                <span aria-hidden="true">◇</span> 答えを公開
               </button>
-              <p id="answer" class="answer"></p>
-              <div id="hostControls" hidden>
-                <div id="youtube"><div id="player"></div></div>
-                <p class="muted" id="mediaNote">
-                  音声は司会者の端末で再生します。同じ場所で遊ぶか、通話で音声を共有してください。
+            </article>
+            <article
+              id="hostWinnerTile"
+              class="tile winner-tile"
+              data-active="false"
+              aria-live="polite"
+            >
+              <span class="kicker">FIRST BUZZ</span>
+              <div class="winner-symbol" aria-hidden="true">⚡</div>
+              <h2 id="hostWinner">最初の早押しを待っています</h2>
+              <span id="hostWinnerTime" class="winner-time">—</span>
+            </article>
+            <article class="tile queue-tile">
+              <div class="tile-heading">
+                <h2>押した順番</h2>
+                <span id="queueCount" class="hint">0 人</span>
+              </div>
+              <ol id="hostQueue" class="buzz-queue"></ol>
+              <p id="queueEmpty" class="empty-note">
+                押すとここに順番が表示されます。
+              </p>
+            </article>
+            <article class="tile scores-tile">
+              <div class="tile-heading">
+                <h2>プレイヤーの得点</h2>
+                <span class="kicker">SCORE BOARD</span>
+              </div>
+              <div id="hostScores" class="score-grid"></div>
+              <p id="hostScoresEmpty" class="empty-note">
+                招待リンクを送って、プレイヤーを集めよう。
+              </p>
+            </article>
+            <article id="youtube" class="tile media-tile" hidden>
+              <div class="media-copy">
+                <span class="kicker">INTRO PLAYER</span>
+                <h2>運営側の音声プレイヤー</h2>
+                <p class="hint">
+                  実際の再生開始にタイマーが連動。早押しで自動停止します。同室で遊ぶか、通話で音声を共有してください。
                 </p>
-                <div class="controls">
-                  <button id="start" class="primary">▶ 開始 / 再開</button
-                  ><button id="pause">一時停止</button
-                  ><button id="reset">リセット</button
-                  ><button id="reveal">答えを見る</button
-                  ><button id="next">次の問題 →</button>
+              </div>
+              <div id="player"></div>
+            </article>
+            <details id="imports" class="tile imports-tile" hidden>
+              <summary>
+                問題を準備する <span>CSV / スプレッドシート / YouTube</span>
+              </summary>
+              <div class="import-content">
+                <p class="hint">
+                  CSVの列：title, answer, url,
+                  start（開始秒）。「問題」「答え」「URL」「開始秒」も使用できます。
+                </p>
+                <div class="import-row">
+                  <label class="file"
+                    >CSVを選ぶ<input
+                      id="csv"
+                      type="file"
+                      accept=".csv,text/csv" /></label
+                  ><a href="/sample.csv" download>サンプルCSV ↓</a
+                  ><button id="sample">サンプルで試す</button>
                 </div>
-              </div>
-            </article>
-            <article id="imports" class="card" hidden>
-              <h3>問題を準備する</h3>
-              <p class="muted">
-                CSVの列：title, answer, url,
-                start（開始秒）。日本語の「問題」「答え」「URL」「開始秒」も使用できます。
-              </p>
-              <div class="import-row">
-                <label class="file"
-                  >CSVを選ぶ<input
-                    id="csv"
-                    type="file"
-                    accept=".csv,text/csv" /></label
-                ><a href="/sample.csv" download>サンプルCSV ↓</a
-                ><button id="sample">サンプルで試す</button>
-              </div>
-              <label
-                >公開Googleスプレッドシート<input
-                  id="sheetUrl"
-                  placeholder="https://docs.google.com/spreadsheets/d/..." /></label
-              ><button id="sheet">シートから取り込む</button>
-              <div id="playlistSection">
                 <label
-                  >YouTubeプレイリスト<input
-                    id="playlistUrl"
-                    placeholder="https://www.youtube.com/playlist?list=..." /></label
-                ><button id="playlist">プレイリストを取り込む</button>
-                <p class="muted">
-                  公開・限定公開リストに対応。埋め込み不可の動画は再生できません。取り込み後、曲名と答えを編集して保存してください。
+                  >公開Googleスプレッドシート<input
+                    id="sheetUrl"
+                    placeholder="https://docs.google.com/spreadsheets/d/..." /></label
+                ><button id="sheet">シートから取り込む</button>
+                <div id="playlistSection">
+                  <label
+                    >YouTubeプレイリスト<input
+                      id="playlistUrl"
+                      placeholder="https://www.youtube.com/playlist?list=..." /></label
+                  ><button id="playlist">プレイリストを取り込む</button>
+                  <p class="hint">
+                    公開・限定公開リストに対応。埋め込み可能な動画をご利用ください。取り込み後、曲名と答えを編集して保存します。
+                  </p>
+                </div>
+                <label
+                  >問題を編集（CSV形式）<textarea
+                    id="editor"
+                    rows="6"
+                    placeholder="title,answer,url,start"
+                  ></textarea></label
+                ><button id="saveQuestions" class="primary">問題を保存</button>
+                <p class="hint">
+                  取り込み・保存すると現在のラウンドをリセットします。
                 </p>
               </div>
-              <label
-                >問題を編集（1行に1問 / CSV形式）<textarea
-                  id="editor"
-                  rows="6"
-                  placeholder="title,answer,url,start"
-                ></textarea></label
-              ><button id="saveQuestions">編集した問題を保存</button>
-              <p class="muted">
-                取り込み・保存すると現在の問題をリセットします。
-              </p>
-            </article>
+            </details>
           </div>
-          <aside class="card">
-            <h3>参加者 <span id="playerCount"></span></h3>
-            <p class="muted">司会者が ＋ / − で得点を調整できます。</p>
-            <div id="players"></div>
-            <p class="muted">
-              押下順はサーバーへの到着順です。通信環境によって差が出ます。
-            </p>
-          </aside>
-        </div>
+        </section>
+        <section
+          id="playerScreen"
+          class="player-screen"
+          aria-label="プレイヤー画面"
+          hidden
+        >
+          <div class="player-hud">
+            <div>
+              <span class="kicker" id="playerProgress">ROUND 01</span>
+              <div class="hud-name">
+                <span id="myName"></span
+                ><span class="connection status-dot">接続中…</span>
+              </div>
+            </div>
+            <div class="hud-right">
+              <div class="my-score">
+                <b id="myScore">0</b><span>POINTS</span>
+              </div>
+              <button
+                id="playerLeave"
+                class="quiet"
+                aria-label="ルームから退出"
+              >
+                退出
+              </button>
+            </div>
+          </div>
+          <article class="player-stage">
+            <div class="stage-top">
+              <span id="playerPhase" class="phase" data-phase="ready"
+                >スタンバイ</span
+              ><span id="playerRoomCode" class="hint"></span>
+            </div>
+            <h1 id="playerQuestion">運営の開始を待っています</h1>
+            <p id="playerAnswer" class="player-answer" hidden></p>
+            <div id="playerTimer" class="timer">0.000</div>
+            <span class="kicker">SECONDS</span>
+            <div
+              id="playerWinner"
+              class="player-winner"
+              hidden
+              aria-live="polite"
+            ></div>
+          </article>
+          <section class="podium-section" aria-label="回答台">
+            <div class="tile-heading">
+              <h2>回答台</h2>
+              <span id="playerCount" class="hint">0 PLAYERS</span>
+            </div>
+            <div id="podiums" class="podium-grid"></div>
+          </section>
+          <div id="buzzerDock" class="buzzer-dock">
+            <div class="buzzer-info">
+              <span id="buzzStatus" aria-live="polite">開始を待っています</span
+              ><span id="myRank">YOUR BUZZER</span>
+            </div>
+            <button id="buzz" class="buzz" disabled>
+              <span id="buzzLabel">スタンバイ</span
+              ><span class="buzz-arrow" aria-hidden="true">⚡</span>
+            </button>
+            <span class="buzzer-help">タップ / SPACE で早押し</span>
+          </div>
+        </section>
       </section>
     </main>
     <div id="toast" role="status"></div>
-    <footer>ポン！ — 集まれば、クイズの時間。</footer>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>
   </body>

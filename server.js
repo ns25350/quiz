@@ -43,6 +43,7 @@ export function createApp() {
       })),
       hostId: r.hostId,
       phase: r.phase,
+      round: r.round,
       startedAt: r.startedAt,
       elapsed: r.elapsed,
       buzzes: r.buzzes,
@@ -113,6 +114,7 @@ export function createApp() {
         players: new Map(),
         questions: [],
         index: 0,
+        round: 1,
       };
       reset(r);
       r.players.set(socket.id, {
@@ -153,6 +155,7 @@ export function createApp() {
         start: Math.max(0, Number(q.start) || 0),
       }));
       r.index = 0;
+      r.round = 1;
       reset(r);
       broadcast(r);
     });
@@ -181,6 +184,7 @@ export function createApp() {
       if (!qs.length) throw Error("問題がありません");
       r.questions = qs;
       r.index = 0;
+      r.round = 1;
       reset(r);
       broadcast(r);
     });
@@ -188,7 +192,7 @@ export function createApp() {
       const r = host();
       if (r.mode !== "button" && !r.questions[r.index])
         throw Error("先に問題を取り込んでください");
-      if (r.phase !== "ready" && r.phase !== "paused")
+      if (r.revealed || (r.phase !== "ready" && r.phase !== "paused"))
         throw Error("リセットしてから開始してください");
       r.startedAt = Date.now() - r.elapsed;
       r.phase = "playing";
@@ -204,12 +208,18 @@ export function createApp() {
     });
     on("buzz", () => {
       const r = get();
-      if (!r || r.phase !== "playing") throw Error("まだ受付していません");
+      if (!r) throw Error("部屋に参加してください");
+      if (r.hostId === socket.id) throw Error("運営は早押しに参加できません");
       if (r.buzzes.some((b) => b.id === socket.id)) return;
+      if (!["playing", "buzzed"].includes(r.phase) || r.revealed)
+        throw Error("まだ受付していません");
       const ms = Date.now() - r.startedAt;
       r.buzzes.push({ id: socket.id, name: r.players.get(socket.id).name, ms });
-      r.elapsed = ms;
-      r.phase = "buzzed";
+      // Freeze the game clock on the first arrival, but keep collecting ranks.
+      if (r.buzzes.length === 1) {
+        r.elapsed = ms;
+        r.phase = "buzzed";
+      }
       broadcast(r);
     });
     on("reset", () => {
@@ -219,20 +229,30 @@ export function createApp() {
     });
     on("next", () => {
       const r = host();
-      if (r.index + 1 >= r.questions.length) throw Error("最後の問題です");
-      r.index++;
+      if (r.mode !== "button") {
+        if (r.index + 1 >= r.questions.length) throw Error("最後の問題です");
+        r.index++;
+      }
+      r.round++;
       reset(r);
       broadcast(r);
     });
     on("reveal", () => {
       const r = host();
+      if (r.mode === "button" || !r.questions[r.index])
+        throw Error("公開する答えがありません");
+      if (r.phase === "playing") {
+        r.elapsed = Date.now() - r.startedAt;
+        r.phase = "paused";
+      }
       r.revealed = true;
       broadcast(r);
     });
     on("score", ({ id, delta }) => {
       const r = host();
       const p = r.players.get(id);
-      if (!p || ![1, -1].includes(delta)) throw Error("採点が不正です");
+      if (!p || id === r.hostId || ![1, -1].includes(delta))
+        throw Error("採点が不正です");
       p.score += delta;
       broadcast(r);
     });
