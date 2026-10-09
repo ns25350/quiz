@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: pon-quiz
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm ci --include=dev && npm test && npm prune --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.19.0
+      - key: NODE_ENV
+        value: production

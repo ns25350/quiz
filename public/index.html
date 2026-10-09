@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ポン！ | みんなで早押しクイズ</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <a href="/" class="logo">ポン！<span>QUIZ ROOM</span></a
+      ><span id="connection">接続中…</span>
+    </header>
+    <main>
+      <section id="lobby">
+        <div class="hero">
+          <span class="eyebrow">音楽も、知識も、反射神経も。</span>
+          <h1>わかった瞬間、<br /><em>ポン！</em>と押そう。</h1>
+          <p>
+            部屋をつくって、仲間と早押し。<br />お気に入りの曲でイントロクイズをはじめよう。
+          </p>
+          <div class="tags">
+            <span>🎵 イントロクイズ</span><span>⚡ 早押しボタン</span
+            ><span>💡 ノーマルクイズ</span>
+          </div>
+        </div>
+        <div class="card lobby-card">
+          <label
+            >あなたの名前<input
+              id="name"
+              maxlength="24"
+              placeholder="例：クイズ太郎"
+              value=""
+          /></label>
+          <div class="tabs">
+            <button id="createTab" class="selected">部屋をつくる</button
+            ><button id="joinTab">部屋に入る</button>
+          </div>
+          <div id="createForm">
+            <label
+              >遊び方<select id="mode">
+                <option value="intro">🎵 イントロクイズ</option>
+                <option value="button">⚡ 早押しボタンのみ</option>
+                <option value="normal">💡 ノーマルクイズ</option>
+              </select></label
+            >
+            <p class="muted">
+              作った人が司会者になります。参加者は部屋コードで参加できます。
+            </p>
+            <button id="create" class="primary full">部屋をつくる →</button>
+          </div>
+          <div id="joinForm" hidden>
+            <label
+              >部屋コード<input
+                id="code"
+                placeholder="6桁のコード"
+                maxlength="6" /></label
+            ><button id="join" class="primary full">部屋に入る →</button>
+          </div>
+        </div>
+      </section>
+      <section id="room" hidden>
+        <div class="room-top">
+          <div>
+            <span class="eyebrow" id="modeLabel"></span>
+            <h2>ROOM <span id="roomCode"></span></h2>
+          </div>
+          <div>
+            <button id="copy">招待リンクをコピー</button
+            ><button id="leave">退出</button>
+          </div>
+        </div>
+        <div class="game-grid">
+          <div>
+            <article class="card game">
+              <div class="game-meta">
+                <span id="progress"></span
+                ><span id="phase" class="badge"></span>
+              </div>
+              <h2 id="question">準備しましょう</h2>
+              <div id="timer">00.000<span>SECONDS</span></div>
+              <div id="winner"></div>
+              <button id="buzz" class="buzz">
+                早押し！<small>SPACE / タップ</small>
+              </button>
+              <p id="answer" class="answer"></p>
+              <div id="hostControls" hidden>
+                <div id="youtube"><div id="player"></div></div>
+                <p class="muted" id="mediaNote">
+                  音声は司会者の端末で再生します。同じ場所で遊ぶか、通話で音声を共有してください。
+                </p>
+                <div class="controls">
+                  <button id="start" class="primary">▶ 開始 / 再開</button
+                  ><button id="pause">一時停止</button
+                  ><button id="reset">リセット</button
+                  ><button id="reveal">答えを見る</button
+                  ><button id="next">次の問題 →</button>
+                </div>
+              </div>
+            </article>
+            <article id="imports" class="card" hidden>
+              <h3>問題を準備する</h3>
+              <p class="muted">
+                CSVの列：title, answer, url,
+                start（開始秒）。日本語の「問題」「答え」「URL」「開始秒」も使用できます。
+              </p>
+              <div class="import-row">
+                <label class="file"
+                  >CSVを選ぶ<input
+                    id="csv"
+                    type="file"
+                    accept=".csv,text/csv" /></label
+                ><a href="/sample.csv" download>サンプルCSV ↓</a
+                ><button id="sample">サンプルで試す</button>
+              </div>
+              <label
+                >公開Googleスプレッドシート<input
+                  id="sheetUrl"
+                  placeholder="https://docs.google.com/spreadsheets/d/..." /></label
+              ><button id="sheet">シートから取り込む</button>
+              <div id="playlistSection">
+                <label
+                  >YouTubeプレイリスト<input
+                    id="playlistUrl"
+                    placeholder="https://www.youtube.com/playlist?list=..." /></label
+                ><button id="playlist">プレイリストを取り込む</button>
+                <p class="muted">
+                  公開・限定公開リストに対応。埋め込み不可の動画は再生できません。取り込み後、曲名と答えを編集して保存してください。
+                </p>
+              </div>
+              <label
+                >問題を編集（1行に1問 / CSV形式）<textarea
+                  id="editor"
+                  rows="6"
+                  placeholder="title,answer,url,start"
+                ></textarea></label
+              ><button id="saveQuestions">編集した問題を保存</button>
+              <p class="muted">
+                取り込み・保存すると現在の問題をリセットします。
+              </p>
+            </article>
+          </div>
+          <aside class="card">
+            <h3>参加者 <span id="playerCount"></span></h3>
+            <p class="muted">司会者が ＋ / − で得点を調整できます。</p>
+            <div id="players"></div>
+            <p class="muted">
+              押下順はサーバーへの到着順です。通信環境によって差が出ます。
+            </p>
+          </aside>
+        </div>
+      </section>
+    </main>
+    <div id="toast" role="status"></div>
+    <footer>ポン！ — 集まれば、クイズの時間。</footer>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
