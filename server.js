@@ -4,6 +4,8 @@ import { Server } from "socket.io";
 import { randomBytes } from "node:crypto";
 import { parse } from "csv-parse/sync";
 import { fileURLToPath } from "node:url";
+import { fetchYouTubeTitle, youtubeVideoId } from "./youtube.js";
+import { evaluateGame, lifeLossForJudgment, ruleNames } from "./rules.js";
 
 export function questionsFromCsv(text) {
   const rows = parse(text.replace(/^\uFEFF/, ""), {
@@ -30,14 +32,90 @@ const defaultSettings = {
   recordAllBuzzes: true,
   correctPoints: 1,
   wrongPoints: 0,
+  rule: "points",
+  startingLives: 3,
+  lifeDamage: 1,
+  wrongLifeLoss: 1,
 };
 const soundTypes = new Set(["bell", "pop", "arcade", "none"]);
 
-export function createApp() {
+export function createApp({ fetchVideoTitle = fetchYouTubeTitle } = {}) {
   const app = express();
   const http = createServer(app);
   const io = new Server(http, { maxHttpBufferSize: 512000 });
   const rooms = new Map();
+  const titleCache = new Map();
+  const metadataUpdates = new Map();
+  function refreshGame(r, keepFinished = false) {
+    const previous = r.game;
+    const evaluated = evaluateGame(r);
+    for (const p of r.players.values())
+      Object.assign(p, evaluated.stats.get(p.id));
+    r.game =
+      keepFinished && previous?.status === "finished"
+        ? previous
+        : evaluated.game;
+  }
+  function queueMetadataUpdate(r) {
+    if (metadataUpdates.has(r.code)) return;
+    const timer = setTimeout(() => {
+      metadataUpdates.delete(r.code);
+      if (rooms.get(r.code) === r) broadcast(r);
+    }, 100);
+    timer.unref();
+    metadataUpdates.set(r.code, timer);
+  }
+  async function lookupTitle(id) {
+    let entry = titleCache.get(id);
+    if (!entry || entry.expires < Date.now()) {
+      const promise = Promise.resolve()
+        .then(() => fetchVideoTitle(id))
+        .then((title) => {
+          if (typeof title !== "string" || !title.trim())
+            throw Error("タイトルを取得できません");
+          return title.trim().slice(0, 500);
+        });
+      entry = { promise, expires: Date.now() + 3600000 };
+      titleCache.set(id, entry);
+      if (titleCache.size > 1000)
+        titleCache.delete(titleCache.keys().next().value);
+      promise.catch(() => {
+        if (titleCache.get(id) === entry) titleCache.delete(id);
+      });
+    }
+    return entry.promise;
+  }
+  function enrichTitles(r, questions = r.questions) {
+    if (r.mode !== "intro") return;
+    const pending = questions.filter((q) => q.titleStatus !== "ready");
+    for (const q of pending)
+      q.titleStatus = youtubeVideoId(q.url) ? "loading" : "failed";
+    let cursor = 0;
+    async function worker() {
+      while (
+        cursor < pending.length &&
+        rooms.get(r.code) === r &&
+        r.questions === questions
+      ) {
+        const q = pending[cursor++],
+          id = youtubeVideoId(q.url);
+        if (!id) continue;
+        try {
+          const title = await lookupTitle(id);
+          if (rooms.get(r.code) !== r || r.questions !== questions) return;
+          q.answer = title;
+          q.videoTitle = title;
+          q.title ||= title;
+          q.titleStatus = "ready";
+        } catch {
+          if (q.titleStatus !== "ready") q.titleStatus = "failed";
+        }
+        if (rooms.get(r.code) === r && r.questions === questions)
+          queueMetadataUpdate(r);
+      }
+    }
+    for (let i = 0; i < Math.min(3, pending.length); i++) void worker();
+  }
   app.use(express.static(fileURLToPath(new URL("./public", import.meta.url))));
   app.get("/health", (_, res) => res.json({ ok: true }));
   function state(r, host = false) {
@@ -51,6 +129,10 @@ export function createApp() {
         name: p.name,
         score: host || r.settings.showScores ? p.score : null,
         online: p.online,
+        correct: host || r.settings.showScores ? p.correct : null,
+        wrong: host || r.settings.showScores ? p.wrong : null,
+        lives: host || r.settings.showScores ? p.lives : null,
+        status: p.status,
       })),
       hostId: r.hostId,
       phase: r.phase,
@@ -58,6 +140,7 @@ export function createApp() {
       roundId: r.roundId,
       settings: r.settings,
       judgment: r.judgment,
+      game: r.game,
       startedAt: r.startedAt,
       elapsed: r.elapsed,
       buzzes: r.buzzes,
@@ -76,6 +159,7 @@ export function createApp() {
                 : "",
             start: q.start,
             answer: host || r.revealed ? q.answer : "",
+            titleStatus: host ? q.titleStatus : undefined,
           }
         : null,
       questions: host ? r.questions : undefined,
@@ -109,7 +193,14 @@ export function createApp() {
       socket.leave(code);
       if (r.hostId === socket.id) r.hostId = [...r.players.keys()][0];
       if (!r.players.size) rooms.delete(code);
-      else broadcast(r);
+      else {
+        refreshGame(r, true);
+        if (r.game.status === "finished" && r.phase === "playing") {
+          r.elapsed = Date.now() - r.startedAt;
+          r.phase = "paused";
+        }
+        broadcast(r);
+      }
       code = undefined;
     };
     const on = (name, fn) =>
@@ -135,6 +226,9 @@ export function createApp() {
         index: 0,
         round: 1,
         settings: { ...defaultSettings },
+        results: [],
+        matchStarted: false,
+        hadCompetition: false,
       };
       reset(r);
       r.players.set(socket.id, {
@@ -144,6 +238,7 @@ export function createApp() {
         online: true,
       });
       rooms.set(code, r);
+      refreshGame(r);
       socket.join(code);
       broadcast(r);
     });
@@ -158,8 +253,15 @@ export function createApp() {
         name: String(name || "ゲスト").slice(0, 24),
         score: 0,
         online: true,
+        spectator: r.game.status === "finished",
       });
       socket.join(code);
+      if (
+        [...r.players.values()].filter((p) => p.id !== r.hostId && !p.spectator)
+          .length >= 2
+      )
+        r.hadCompetition = true;
+      refreshGame(r, true);
       broadcast(r);
     });
     on("leave", leave);
@@ -177,6 +279,7 @@ export function createApp() {
       r.index = 0;
       r.round = 1;
       reset(r);
+      enrichTitles(r);
       broadcast(r);
     });
     on("sheet", async ({ url }) => {
@@ -206,16 +309,51 @@ export function createApp() {
       r.index = 0;
       r.round = 1;
       reset(r);
+      enrichTitles(r);
+      broadcast(r);
+    });
+    on("retryTitles", () => {
+      const r = host();
+      if (r.mode !== "intro") throw Error("イントロクイズのみ使用できます");
+      enrichTitles(r);
+      broadcast(r);
+    });
+    on("videoTitle", ({ videoId, title, roundId }) => {
+      const r = host(),
+        q = r.questions[r.index];
+      if (
+        r.mode !== "intro" ||
+        !q ||
+        roundId !== r.roundId ||
+        videoId !== youtubeVideoId(q.url) ||
+        typeof title !== "string" ||
+        !title.trim() ||
+        title.length > 500
+      )
+        throw Error("現在の動画タイトルを指定してください");
+      q.answer = q.videoTitle = title.trim();
+      q.title ||= q.answer;
+      q.titleStatus = "ready";
       broadcast(r);
     });
     on("start", () => {
       const r = host();
+      if (r.game.status === "finished")
+        throw Error("ゲームは終了しました。新しいゲームを始めてください");
+      if (
+        r.settings.rule === "survival" &&
+        !r.matchStarted &&
+        [...r.players.values()].filter((p) => p.status === "active").length < 2
+      )
+        throw Error("ライフバトルはプレイヤー2人以上で開始してください");
       if (r.mode !== "button" && !r.questions[r.index])
         throw Error("先に問題を取り込んでください");
       if (r.revealed || (r.phase !== "ready" && r.phase !== "paused"))
         throw Error("リセットしてから開始してください");
       r.startedAt = Date.now() - r.elapsed;
       r.phase = "playing";
+      r.matchStarted = true;
+      refreshGame(r);
       broadcast(r);
     });
     on("pause", () => {
@@ -230,6 +368,11 @@ export function createApp() {
       const r = get();
       if (!r) throw Error("部屋に参加してください");
       if (r.hostId === socket.id) throw Error("運営は早押しに参加できません");
+      if (
+        r.game.status === "finished" ||
+        r.players.get(socket.id)?.status !== "active"
+      )
+        throw Error("このゲームでは回答できません");
       if (roundId && roundId !== r.roundId)
         throw Error("ラウンドが切り替わりました");
       if (r.buzzes.some((b) => b.id === socket.id)) return;
@@ -259,12 +402,29 @@ export function createApp() {
     });
     on("next", () => {
       const r = host();
+      if (r.game.status === "finished")
+        throw Error("ゲームは終了しました。新しいゲームを始めてください");
       if (r.mode !== "button") {
         if (r.index + 1 >= r.questions.length) throw Error("最後の問題です");
         r.index++;
       }
       r.round++;
       reset(r);
+      broadcast(r);
+    });
+    on("restartGame", () => {
+      const r = host();
+      r.results = [];
+      r.matchStarted = false;
+      r.hadCompetition = r.players.size >= 3;
+      for (const p of r.players.values()) {
+        p.score = 0;
+        p.spectator = false;
+      }
+      r.index = 0;
+      r.round = 1;
+      reset(r);
+      refreshGame(r);
       broadcast(r);
     });
     on("reveal", () => {
@@ -286,16 +446,33 @@ export function createApp() {
         if (!Object.hasOwn(defaultSettings, key)) throw Error("不明な設定です");
         if (typeof defaultSettings[key] === "boolean") {
           if (typeof value !== "boolean") throw Error("設定が不正です");
-        } else if (
-          !Number.isInteger(value) ||
-          (key === "correctPoints"
-            ? value < 0 || value > 100
-            : value < -100 || value > 0)
-        ) {
-          throw Error("正解は0〜100点、不正解は−100〜0点で設定してください");
+        } else if (key === "rule") {
+          if (!Object.hasOwn(ruleNames, value)) throw Error("ルールが不正です");
+        } else {
+          const ranges = {
+            correctPoints: [0, 100],
+            wrongPoints: [-100, 0],
+            startingLives: [1, 20],
+            lifeDamage: [1, 20],
+            wrongLifeLoss: [0, 20],
+          };
+          const [min, max] = ranges[key];
+          if (!Number.isInteger(value) || value < min || value > max)
+            throw Error("点数・ライフの設定範囲を確認してください");
         }
       }
+      if (
+        r.matchStarted &&
+        ["rule", "startingLives", "lifeDamage", "wrongLifeLoss"].some(
+          (key) =>
+            Object.hasOwn(settings, key) && settings[key] !== r.settings[key],
+        )
+      )
+        throw Error(
+          "ルールを変更する前に「新しいゲーム」で成績をリセットしてください",
+        );
       Object.assign(r.settings, settings);
+      refreshGame(r, true);
       broadcast(r);
     });
     on("judge", ({ correct, id, roundId }) => {
@@ -311,10 +488,25 @@ export function createApp() {
       const p = r.players.get(first.id);
       if (!p || p.id === r.hostId) throw Error("回答者が部屋にいません");
       if (r.judgment?.correct === correct) return;
+      const previousIndex = r.results.findIndex(
+        (result) => result.roundId === r.roundId,
+      );
+      const remaining = r.results.filter(
+        (result) => result.roundId !== r.roundId,
+      );
+      const before = evaluateGame({ ...r, results: remaining });
       if (r.judgment) p.score -= r.judgment.delta;
       const delta = correct ? r.settings.correctPoints : r.settings.wrongPoints;
       p.score += delta;
       r.judgment = { id: p.id, name: p.name, correct, delta };
+      const result = {
+        ...r.judgment,
+        roundId: r.roundId,
+        lifeLoss: lifeLossForJudgment(r, p.id, correct, before.stats),
+      };
+      if (previousIndex >= 0) r.results[previousIndex] = result;
+      else r.results.push(result);
+      refreshGame(r);
       broadcast(r);
     });
     on("score", ({ id, delta }) => {

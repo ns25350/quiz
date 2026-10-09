@@ -66,6 +66,7 @@ export function createPlayerIntroAudio({
                     : "準備完了 · 運営の開始を待っています。";
     $("playerMusicVolume").value = volume;
     $("musicVolumeValue").value = `${volume}%`;
+    window.dispatchEvent(new Event("intro-audio-state"));
   }
   function applyVolume() {
     if (!ready) return;
@@ -207,6 +208,13 @@ export function createPlayerIntroAudio({
     sync,
     reset,
     onApiReady: ensurePlayer,
+    getPlaybackState: () => ({
+      enabled,
+      playing:
+        ready && player.getPlayerState() === window.YT.PlayerState.PLAYING,
+      muted: muted || volume === 0,
+      failed,
+    }),
     onApiError: () => {
       failed = true;
       failureMessage =

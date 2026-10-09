@@ -67,6 +67,23 @@
       </section>
       <section id="room" hidden>
         <section id="hostScreen" aria-label="運営画面" hidden>
+          <section
+            id="hostRuleStrip"
+            class="game-rule-strip"
+            aria-label="ゲームルール"
+          >
+            <div>
+              <h2 id="hostRuleName">得点制</h2>
+              <p id="hostRuleDescription"></p>
+              <p
+                id="hostGameResult"
+                class="game-result"
+                role="status"
+                hidden
+              ></p>
+            </div>
+            <button id="restartGame" class="quiet">新しいゲーム</button>
+          </section>
           <div class="host-grid">
             <article class="tile session-tile">
               <div class="tile-heading">
@@ -203,8 +220,14 @@
                       placeholder="https://www.youtube.com/playlist?list=..." /></label
                   ><button id="playlist">プレイリストを取り込む</button>
                   <p class="hint">
-                    公開・限定公開リストに対応。埋め込み可能な動画をご利用ください。取り込み後、曲名と答えを編集して保存します。
+                    公開・限定公開リストに対応。答えは各動画のタイトルから自動設定します。
                   </p>
+                </div>
+                <div id="titleImportStatus" class="title-import-status" hidden>
+                  <p id="titleImportMessage" class="hint" role="status"></p>
+                  <button id="retryTitles" class="quiet" hidden>
+                    タイトル取得を再試行
+                  </button>
                 </div>
                 <label
                   >問題を編集（CSV形式）<textarea
@@ -254,6 +277,23 @@
               </button>
             </div>
           </div>
+          <section
+            id="playerRuleStrip"
+            class="game-rule-strip player-rule-strip"
+            aria-label="ゲームルール"
+          >
+            <div>
+              <h2 id="playerRuleName">得点制</h2>
+              <p id="playerRuleDescription"></p>
+              <p
+                id="playerGameResult"
+                class="game-result"
+                role="status"
+                hidden
+              ></p>
+            </div>
+            <span id="myRuleProgress" class="my-rule-progress"></span>
+          </section>
           <section
             id="playerMusicArea"
             class="player-music-area"
@@ -308,6 +348,15 @@
               </div>
               <h1 id="playerQuestion">運営の開始を待っています</h1>
               <p id="playerAnswer" class="player-answer" hidden></p>
+              <div
+                id="musicVisualizer"
+                class="music-visualizer"
+                data-active="false"
+                hidden
+              >
+                <div id="musicBars" class="music-bars" aria-hidden="true"></div>
+                <p id="musicVisualStatus" role="status">イントロ待機中</p>
+              </div>
               <div id="timerDisplay" class="timer-display">
                 <div id="playerTimer" class="timer">0.000</div>
                 <span class="kicker">SECONDS</span>
@@ -368,6 +417,49 @@
           </button>
         </div>
         <p class="hint">この部屋の全員に反映されます。</p>
+        <label
+          >ゲームルール<select id="rule">
+            <option value="points">得点制</option>
+            <option value="seven-three">7○3×（ナナマルサンバツ）</option>
+            <option value="survival">ライフバトル</option>
+          </select></label
+        >
+        <p id="ruleSettingDescription" class="hint"></p>
+        <div id="lifeSettings" class="settings-two-columns" hidden>
+          <label
+            >初期ライフ<input
+              id="startingLives"
+              type="number"
+              min="1"
+              max="20"
+              step="1"
+              value="3"
+              required
+          /></label>
+          <label
+            >正解で他の人から削るライフ<input
+              id="lifeDamage"
+              type="number"
+              min="1"
+              max="20"
+              step="1"
+              value="1"
+              required
+          /></label>
+          <label
+            >不正解で本人から削るライフ<input
+              id="wrongLifeLoss"
+              type="number"
+              min="0"
+              max="20"
+              step="1"
+              value="1"
+              required
+          /></label>
+        </div>
+        <p id="ruleSettingsLocked" class="hint" hidden>
+          ゲーム開始後のルール変更は「新しいゲーム」で全員の成績をリセットしてから行ってください。
+        </p>
         <div class="settings-tile">
           <label class="setting-row"
             ><span

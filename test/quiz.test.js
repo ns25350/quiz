@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { io as client } from "socket.io-client";
-import { createApp, questionsFromCsv } from "../server.js";
+import { createApp as createQuizApp, questionsFromCsv } from "../server.js";
+const createApp = () =>
+  createQuizApp({ fetchVideoTitle: async (id) => `動画 ${id}` });
 
 test(
   "intro music permission controls video access independently of buzz sounds",

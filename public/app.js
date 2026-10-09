@@ -1,5 +1,12 @@
 import { createBuzzerCustomization } from "./buzzer.js";
 import { createPlayerIntroAudio } from "./intro-audio.js";
+import {
+  createMusicVisualizer,
+  renderGameRule,
+  ruleDescription,
+  ruleProgressNode,
+  statusText,
+} from "./game-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const socket = io();
@@ -13,6 +20,9 @@ let state,
   lastVideo = "",
   toastTimeout,
   clockOffset = 0;
+let editorDirty = false,
+  cuedTitleRound = "",
+  reportedTitle = "";
 const phaseNames = {
   ready: "スタンバイ",
   playing: "早押し受付中",
@@ -32,6 +42,8 @@ const inSession = () =>
 const canBuzz = () =>
   inSession() &&
   !host() &&
+  state.game.status !== "finished" &&
+  state.players.find((p) => p.id === socket.id)?.status === "active" &&
   !state.revealed &&
   (state.phase === "playing" ||
     (state.phase === "buzzed" && state.settings.recordAllBuzzes)) &&
@@ -86,11 +98,14 @@ function element(tag, className, text) {
   return node;
 }
 function setPhase(id) {
-  $(id).textContent = state.revealed
-    ? "答えを公開中"
-    : state.phase === "buzzed" && !state.settings.recordAllBuzzes
-      ? "回答待ち"
-      : phaseNames[state.phase];
+  $(id).textContent =
+    state.game.status === "finished"
+      ? "ゲーム終了"
+      : state.revealed
+        ? "答えを公開中"
+        : state.phase === "buzzed" && !state.settings.recordAllBuzzes
+          ? "回答待ち"
+          : phaseNames[state.phase];
   $(id).dataset.phase = state.phase;
 }
 function roundLabel() {
@@ -112,6 +127,7 @@ function showLobby(code = "") {
   pendingPlay = pendingBuzz = false;
   player?.stopVideo();
   lastVideo = "";
+  cuedTitleRound = reportedTitle = "";
   playerIntroAudio.reset();
   document.body.dataset.screen = "lobby";
   $("lobby").hidden = false;
@@ -255,18 +271,38 @@ $("csv").onchange = async (e) => {
     toast("CSVは500KB以下にしてください");
     return;
   }
-  await send("import", { csv: await file.text() });
+  await importQuestions({ csv: await file.text() });
   e.target.value = "";
 };
-$("sheet").onclick = () => send("sheet", { url: $("sheetUrl").value.trim() });
-$("saveQuestions").onclick = () => send("import", { csv: $("editor").value });
+async function importQuestions(data, event = "import") {
+  const wasDirty = editorDirty;
+  editorDirty = false;
+  const ok = await send(event, data);
+  if (!ok) editorDirty = wasDirty;
+  return ok;
+}
+$("editor").addEventListener("input", () => {
+  editorDirty = true;
+});
+$("sheet").onclick = () =>
+  importQuestions({ url: $("sheetUrl").value.trim() }, "sheet");
+$("saveQuestions").onclick = () => importQuestions({ csv: $("editor").value });
+$("retryTitles").onclick = () => send("retryTitles");
+$("restartGame").onclick = () => {
+  if (
+    confirm(
+      "全員の得点・正解数・不正解数・ライフをリセットし、最初の問題に戻します。新しいゲームを始めますか？",
+    )
+  )
+    send("restartGame");
+};
 $("sample").onclick = () => {
   if (state.mode === "intro")
-    send("import", {
+    importQuestions({
       questions: [
         {
           title: "サンプル曲（答えを編集してください）",
-          answer: "編集して設定",
+          answer: "",
           url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
           start: 0,
         },
@@ -275,7 +311,7 @@ $("sample").onclick = () => {
   else
     fetch("/sample.csv")
       .then((r) => r.text())
-      .then((csv) => send("import", { csv }));
+      .then((csv) => importQuestions({ csv }));
 };
 $("playlist").onclick = () => {
   let list;
@@ -303,7 +339,7 @@ $("playlist").onclick = () => {
     if (ids?.length) {
       clearInterval(poll);
       playlistLoading = false;
-      await send("import", {
+      await importQuestions({
         questions: ids.slice(0, 500).map((id, i) => ({
           title: `曲 ${i + 1}`,
           answer: "",
@@ -311,7 +347,9 @@ $("playlist").onclick = () => {
           start: 0,
         })),
       });
-      toast(`${ids.length}曲を取り込みました。答えを編集してください`);
+      toast(
+        `${ids.length}曲を取り込みました。答えを動画タイトルから自動設定します`,
+      );
     } else if (++attempts >= 20) {
       clearInterval(poll);
       playlistLoading = false;
@@ -329,6 +367,11 @@ const playerIntroAudio = createPlayerIntroAudio({
   getClockOffset: () => clockOffset,
   videoId,
   requestApi: requestYouTubeApi,
+});
+const musicVisualizer = createMusicVisualizer({
+  getRoom: () => state,
+  inSession,
+  getPlaybackState: playerIntroAudio.getPlaybackState,
 });
 window.addEventListener("buzzer-preferences", () => {
   if (state && !host()) renderBuzzer();
@@ -359,12 +402,34 @@ const settingNames = [
   "showScores",
   "correctPoints",
   "wrongPoints",
+  "rule",
+  "startingLives",
+  "lifeDamage",
+  "wrongLifeLoss",
 ];
+function renderRuleSettings() {
+  const settings = {
+    ...state.settings,
+    rule: $("rule").value,
+    startingLives: Number($("startingLives").value),
+    lifeDamage: Number($("lifeDamage").value),
+    wrongLifeLoss: Number($("wrongLifeLoss").value),
+  };
+  $("ruleSettingDescription").textContent = ruleDescription(settings);
+  $("lifeSettings").hidden = settings.rule !== "survival";
+}
+for (const key of ["rule", "startingLives", "lifeDamage", "wrongLifeLoss"])
+  $(key).addEventListener("input", renderRuleSettings);
 $("openRoomSettings").onclick = () => {
   for (const key of settingNames) {
     if ($(key).type === "checkbox") $(key).checked = state.settings[key];
     else $(key).value = state.settings[key];
   }
+  const locked = state.game.status !== "waiting";
+  for (const key of ["rule", "startingLives", "lifeDamage", "wrongLifeLoss"])
+    $(key).disabled = locked;
+  $("ruleSettingsLocked").hidden = !locked;
+  renderRuleSettings();
   $("allowPlayerMusic").disabled = state.mode !== "intro";
   $("playerMusicSettingNote").textContent =
     state.mode === "intro"
@@ -377,7 +442,11 @@ $("roomSettingsForm").onsubmit = async (e) => {
   const settings = Object.fromEntries(
     settingNames.map((key) => [
       key,
-      $(key).type === "checkbox" ? $(key).checked : Number($(key).value),
+      $(key).type === "checkbox"
+        ? $(key).checked
+        : $(key).type === "number"
+          ? Number($(key).value)
+          : $(key).value,
     ]),
   );
   if (await send("settings", { settings })) {
@@ -404,8 +473,18 @@ function renderJudgment() {
     "aria-pressed",
     String(state.judgment?.correct === false),
   );
-  $("correctDelta").textContent = `${signed(state.settings.correctPoints)} PT`;
-  $("wrongDelta").textContent = `${signed(state.settings.wrongPoints)} PT`;
+  $("correctDelta").textContent =
+    state.settings.rule === "seven-three"
+      ? "○ +1"
+      : state.settings.rule === "survival"
+        ? `他の人 −${state.settings.lifeDamage} LIFE`
+        : `${signed(state.settings.correctPoints)} PT`;
+  $("wrongDelta").textContent =
+    state.settings.rule === "seven-three"
+      ? "× +1"
+      : state.settings.rule === "survival"
+        ? `本人 −${state.settings.wrongLifeLoss} LIFE`
+        : `${signed(state.settings.wrongPoints)} PT`;
   $("hostWinnerTile").dataset.judgment = state.judgment
     ? state.judgment.correct
       ? "correct"
@@ -438,6 +517,7 @@ function renderHostControls() {
   $("start").disabled =
     !connected ||
     pendingPlay ||
+    state.game.status === "finished" ||
     state.revealed ||
     !["ready", "paused"].includes(state.phase) ||
     (state.mode !== "button" && !state.count);
@@ -452,7 +532,9 @@ function renderHostControls() {
       ? "再生と同時にタイマー開始"
       : "早押し受付を開始";
   $("next").disabled =
-    !connected || (state.mode !== "button" && state.index + 1 >= state.count);
+    !connected ||
+    state.game.status === "finished" ||
+    (state.mode !== "button" && state.index + 1 >= state.count);
   $("nextHint").textContent =
     state.mode === "button" ? "次のラウンドを準備" : "次の問題を準備";
   $("pause").disabled = !connected || state.phase !== "playing";
@@ -460,6 +542,7 @@ function renderHostControls() {
   $("reveal").hidden = state.mode === "button";
   $("reveal").disabled = !connected || !state.question || state.revealed;
   $("openRoomSettings").disabled = !connected;
+  $("restartGame").disabled = !connected;
   renderJudgment();
 }
 function renderHost(s, prev) {
@@ -479,7 +562,11 @@ function renderHost(s, prev) {
       ? "口頭や外部の音源で出題できます。"
       : s.revealed
         ? "プレイヤーに答えを公開中です。"
-        : "問題と答えは運営用。準備ができたらスタート。";
+        : s.mode === "intro" && s.question?.titleStatus === "loading"
+          ? "動画タイトルから答えを取得しています。"
+          : s.mode === "intro" && s.question?.titleStatus === "failed"
+            ? "動画タイトルの取得に失敗しました。再試行するか答えを手動で入力してください。"
+            : "問題と答えは運営用。準備ができたらスタート。";
   const first = s.buzzes[0];
   $("hostWinnerTile").dataset.active = String(!!first);
   renderJudgment();
@@ -515,11 +602,19 @@ function renderHost(s, prev) {
       const card = element("div", "score-card");
       card.dataset.playerId = p.id;
       card.dataset.first = String(rank === 1);
+      card.dataset.rule = s.settings.rule;
+      card.dataset.status = p.status;
       const top = element("div", "score-card-top");
       top.append(
         element("span", "score-card-name", p.name),
-        element("span", "score-rank", rank ? `${rank}番` : "待機"),
+        element(
+          "span",
+          "score-rank",
+          statusText(p, s.settings) || (rank ? `${rank}番` : "待機"),
+        ),
       );
+      if (s.settings.rule !== "points")
+        top.append(ruleProgressNode(p, s.settings));
       const bottom = element("div", "score-card-bottom");
       const score = element("div", "score-value", p.score);
       score.append(element("small", "", "PT"));
@@ -554,44 +649,62 @@ function renderHost(s, prev) {
   $("youtube").hidden = s.mode !== "intro";
   if (
     s.questions &&
+    !editorDirty &&
     (!prev || JSON.stringify(prev.questions) !== JSON.stringify(s.questions))
   )
     $("editor").value = editorText(s.questions);
+  $("titleImportStatus").hidden = s.mode !== "intro" || !s.count;
+  if (s.mode === "intro" && s.questions) {
+    const ready = s.questions.filter((q) => q.titleStatus === "ready").length;
+    const failed = s.questions.filter((q) => q.titleStatus === "failed").length;
+    const loading = s.count - ready - failed;
+    $("titleImportMessage").textContent =
+      `動画タイトルから答えを設定：${ready} / ${s.count}曲${loading ? ` · ${loading}曲取得中` : ""}${failed ? ` · ${failed}曲取得失敗（手動入力もできます）` : ""}`;
+    $("retryTitles").hidden = !failed || loading > 0;
+  }
   renderHostControls();
   if (s.mode === "intro") ensureYouTube();
 }
 function renderBuzzer() {
   const mine = myBuzz();
   const rank = state.buzzes.findIndex((b) => b.id === socket.id) + 1;
+  const me = state.players.find((p) => p.id === socket.id);
+  const inactive = me?.status !== "active" || state.game.status === "finished";
   $("buzz").disabled = !canBuzz();
   $("buzzerDock").dataset.buzzed = String(!!mine);
-  $("buzzLabel").textContent = mine
-    ? "押下済み！"
-    : pendingBuzz
-      ? "送信中…"
-      : canBuzz()
-        ? customization.preferences.text
-        : state.revealed
-          ? "答え公開中"
-          : state.phase === "paused"
-            ? "一時停止"
-            : state.phase === "buzzed"
-              ? "受付終了"
-              : "スタンバイ";
+  $("buzzLabel").textContent = inactive
+    ? statusText(me, state.settings) || "ゲーム終了"
+    : mine
+      ? "押下済み！"
+      : pendingBuzz
+        ? "送信中…"
+        : canBuzz()
+          ? customization.preferences.text
+          : state.revealed
+            ? "答え公開中"
+            : state.phase === "paused"
+              ? "一時停止"
+              : state.phase === "buzzed"
+                ? "受付終了"
+                : "スタンバイ";
   $("myRank").textContent = mine ? `あなたは ${rank} 番` : "YOUR BUZZER";
   $("buzzStatus").textContent = !inSession()
     ? "接続待ち"
-    : mine
-      ? `${(mine.ms / 1000).toFixed(3)} 秒で押しました`
-      : state.revealed
-        ? "次の問題を待っています"
-        : state.phase === "buzzed"
-          ? state.settings.recordAllBuzzes
-            ? "まだ押せます · 順番を記録"
-            : "今回は先着1人のみ"
-          : state.phase === "playing"
-            ? "わかったら、押そう！"
-            : "運営の開始を待っています";
+    : inactive
+      ? state.game.status === "finished"
+        ? "ゲーム終了 · 新しいゲームを待っています"
+        : "観戦中 · 次のゲームを待っています"
+      : mine
+        ? `${(mine.ms / 1000).toFixed(3)} 秒で押しました`
+        : state.revealed
+          ? "次の問題を待っています"
+          : state.phase === "buzzed"
+            ? state.settings.recordAllBuzzes
+              ? "まだ押せます · 順番を記録"
+              : "今回は先着1人のみ"
+            : state.phase === "playing"
+              ? "わかったら、押そう！"
+              : "運営の開始を待っています";
 }
 function renderPlayer(s) {
   const me = s.players.find((p) => p.id === socket.id);
@@ -629,9 +742,15 @@ function renderPlayer(s) {
       card.dataset.self = String(p.id === socket.id);
       card.dataset.buzzed = String(!!b);
       card.dataset.first = String(index === 0);
+      card.dataset.status = p.status;
       const top = element("div", "podium-top");
+      card.dataset.rule = s.settings.rule;
       top.append(
-        element("span", "podium-order", b ? `${index + 1} 番` : "待機中"),
+        element(
+          "span",
+          "podium-order",
+          statusText(p, s.settings) || (b ? `${index + 1} 番` : "待機中"),
+        ),
       );
       if (p.id === socket.id)
         top.append(element("span", "self-badge", "あなた"));
@@ -648,6 +767,8 @@ function renderPlayer(s) {
           b ? `${(b.ms / 1000).toFixed(3)} s` : "READY",
         ),
       );
+      if (s.settings.rule !== "points")
+        body.append(ruleProgressNode(p, s.settings));
       card.append(top, body, element("div", "podium-light"));
       return card;
     }),
@@ -663,6 +784,7 @@ socket.on("disconnect", () => {
   pendingPlay = pendingBuzz = false;
   player?.pauseVideo();
   playerIntroAudio.reset();
+  musicVisualizer.render();
   if (state) {
     if (host()) renderHostControls();
     else renderBuzzer();
@@ -676,6 +798,7 @@ socket.on("state", (s) => {
   customization.playNewBuzzes(s, prev);
   const isHost = host();
   document.body.dataset.screen = isHost ? "host" : "player";
+  document.body.dataset.mode = s.mode;
   $("lobby").hidden = true;
   $("room").hidden = false;
   $("hostScreen").hidden = !isHost;
@@ -683,8 +806,10 @@ socket.on("state", (s) => {
   history.replaceState(null, "", "/?room=" + s.code);
   if (isHost) renderHost(s, prev);
   else renderPlayer(s);
+  renderGameRule(s, socket.id);
   if (prev && prev.code !== s.code) playerIntroAudio.reset();
   playerIntroAudio.sync();
+  musicVisualizer.render();
   if (player && (s.phase !== "playing" || !isHost) && !pendingPlay)
     player.pauseVideo();
   if (
@@ -699,7 +824,46 @@ socket.on("state", (s) => {
     player.stopVideo();
     lastVideo = "";
   }
+  prepareIntroTitle();
 });
+function reportIntroTitle() {
+  if (
+    !host() ||
+    state.mode !== "intro" ||
+    state.question?.titleStatus === "ready" ||
+    !player?.getVideoData
+  )
+    return;
+  const data = player.getVideoData(),
+    id = videoId(state.question?.url || "");
+  const key = `${state.roundId}:${data.video_id}:${data.title}`;
+  if (data.video_id === id && data.title?.trim() && reportedTitle !== key) {
+    reportedTitle = key;
+    send("videoTitle", {
+      roundId: state.roundId,
+      videoId: id,
+      title: data.title.slice(0, 500),
+    });
+  }
+}
+function prepareIntroTitle() {
+  if (
+    !host() ||
+    state.mode !== "intro" ||
+    !ytReady ||
+    !player?.cueVideoById ||
+    state.phase !== "ready" ||
+    playlistLoading ||
+    !state.question ||
+    state.question.titleStatus === "ready" ||
+    cuedTitleRound === state.roundId
+  )
+    return;
+  const id = videoId(state.question.url);
+  if (!id) return;
+  cuedTitleRound = state.roundId;
+  player.cueVideoById({ videoId: id, startSeconds: state.question.start || 0 });
+}
 function ensureYouTube() {
   if (!host() || state.mode !== "intro" || player) return;
   if (window.YT?.Player) {
@@ -711,8 +875,12 @@ function ensureYouTube() {
         onReady: () => {
           ytReady = true;
           if (host()) renderHostControls();
+          prepareIntroTitle();
         },
         onStateChange: async (e) => {
+          reportIntroTitle();
+          if ([YT.PlayerState.PLAYING, YT.PlayerState.CUED].includes(e.data))
+            setTimeout(reportIntroTitle, 300);
           if (e.data === YT.PlayerState.PLAYING) {
             if (pendingPlay && host()) {
               pendingPlay = false;

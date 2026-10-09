@@ -650,6 +650,10 @@ a {
 body[data-screen="player"] main {
   height: 100dvh;
 }
+body[data-screen="player"] #room {
+  height: 100%;
+  min-height: 0;
+}
 .player-screen {
   max-width: 1440px;
   margin: auto;
@@ -697,6 +701,181 @@ body[data-screen="player"] main {
   font-size: 11px;
   color: var(--muted);
   letter-spacing: 1px;
+}
+.game-rule-strip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  background: var(--panel);
+  border-radius: 18px;
+  padding: 18px 24px;
+  margin-bottom: 18px;
+}
+.game-rule-strip h2 {
+  font-size: 16px;
+}
+.game-rule-strip p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.game-rule-strip > div {
+  min-width: 0;
+}
+.game-rule-strip button {
+  min-height: 44px;
+  flex-shrink: 0;
+}
+.game-rule-strip[data-finished="true"] {
+  background: var(--mint);
+  color: #203322;
+}
+.game-rule-strip[data-finished="true"] p {
+  color: #314f35;
+}
+.game-rule-strip[data-finished="true"] button {
+  color: #203322;
+  border-color: #6b9163;
+}
+.game-rule-strip .game-result {
+  color: var(--mint);
+  font-size: 22px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.game-rule-strip[data-finished="true"] .game-result {
+  color: #203322;
+}
+.player-rule-strip {
+  flex-shrink: 0;
+  padding: 14px 20px;
+}
+.player-rule-strip h2 {
+  font-size: 14px;
+}
+.my-rule-progress {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.rule-progress {
+  font-size: 12px;
+  line-height: 1.6;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.rule-progress meter {
+  display: block;
+  width: 100%;
+  height: 9px;
+  margin-top: 5px;
+  accent-color: var(--mint);
+}
+.rule-progress meter::-webkit-meter-bar {
+  background: #171927;
+  border: 0;
+  border-radius: 6px;
+}
+.rule-progress meter::-webkit-meter-optimum-value {
+  background: var(--mint);
+  border-radius: 6px;
+}
+.rule-progress meter::-moz-meter-bar {
+  background: var(--mint);
+  border-radius: 6px;
+}
+.score-card:not([data-rule="points"]) {
+  padding: 16px;
+  gap: 8px;
+}
+.score-card:not([data-rule="points"]) .score-card-top {
+  gap: 5px;
+}
+.score-card .rule-progress {
+  width: 100%;
+}
+.podium .rule-progress {
+  margin-top: 10px;
+}
+.score-card[data-status="eliminated"],
+.podium[data-status="eliminated"],
+.podium[data-status="spectator"] {
+  background: #262633;
+}
+.score-card[data-status="eliminated"] .score-rank,
+.podium[data-status="eliminated"] .podium-order {
+  color: #f8b9ab;
+}
+.score-card[data-status="won"],
+.podium[data-status="won"] {
+  border: 1px solid var(--mint);
+}
+.score-card[data-status="won"] .score-rank,
+.podium[data-status="won"] .podium-order {
+  color: var(--mint);
+}
+.music-visualizer {
+  padding: 12px 0 2px;
+}
+body[data-mode="intro"] .player-stage .timer-display {
+  order: -2;
+  flex: 0 0 auto;
+  margin: 0 0 12px;
+}
+body[data-mode="intro"] .player-stage .music-visualizer {
+  order: -1;
+}
+.music-bars {
+  height: 54px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  width: min(100%, 280px);
+  margin: auto;
+}
+.music-bars span {
+  width: 7px;
+  height: var(--bar-height);
+  border-radius: 4px;
+  background: var(--muted);
+  transform: scaleY(0.12);
+}
+.music-visualizer[data-active="true"] .music-bars span {
+  background: var(--mint);
+  animation: music-bars var(--bar-duration) var(--bar-delay) ease-in-out
+    infinite alternate;
+}
+.music-visualizer p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.music-visualizer[data-active="true"] p {
+  color: var(--mint);
+}
+@keyframes music-bars {
+  from {
+    transform: scaleY(0.2);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.title-import-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+#rule:disabled {
+  opacity: 0.7;
 }
 .player-music-area {
   flex-shrink: 0;
@@ -876,6 +1055,7 @@ body[data-player-layout="stacked"] .player-stage .timer {
 }
 .podium-grid {
   display: grid;
+  grid-auto-rows: max-content;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
 }
@@ -1444,6 +1624,57 @@ body[data-player-layout="stacked"] .player-stage .timer {
   .player-playfield {
     gap: 12px;
   }
+  .game-rule-strip {
+    padding: 14px 16px;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .player-rule-strip {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .game-rule-strip .game-result {
+    font-size: 18px;
+  }
+  .my-rule-progress {
+    font-size: 12px;
+  }
+  .rule-progress {
+    font-size: 11px;
+  }
+  .podium:not([data-rule="points"]) .podium-body {
+    display: flex;
+    flex-direction: column;
+  }
+  .podium:not([data-rule="points"]) .podium-avatar {
+    display: none;
+  }
+  .podium:not([data-rule="points"]) .podium-name {
+    order: -2;
+  }
+  .podium:not([data-rule="points"]) .rule-progress {
+    order: -1;
+    margin-top: 4px;
+    margin-bottom: 6px;
+  }
+  .podium:not([data-rule="points"]) .podium-score {
+    font-size: 26px;
+  }
+  .music-bars {
+    height: 32px;
+    gap: 3px;
+  }
+  .music-visualizer {
+    padding: 6px 0 2px;
+  }
+  .music-visualizer p {
+    margin-top: 5px;
+    font-size: 11px;
+  }
+  .music-bars span {
+    width: 5px;
+  }
   .player-music-area {
     padding: 16px;
     border-radius: 18px;
@@ -1480,10 +1711,10 @@ body[data-player-layout="stacked"] .player-stage .timer {
   body[data-screen="player"][data-music-enabled="true"] main {
     height: max(100dvh, 920px);
   }
-  body[data-music-enabled="true"] .player-stage .timer-display {
-    order: -1;
+  body[data-mode="intro"] .player-stage .timer-display {
+    order: -2;
     flex: 0 0 auto;
-    margin: 0 0 16px;
+    margin: 0 0 8px;
     min-height: 70px;
   }
   .player-stage {
@@ -1637,6 +1868,10 @@ body[data-player-layout="stacked"] .player-stage .timer {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .music-visualizer[data-active="true"] .music-bars span {
+    animation: none;
+    transform: scaleY(0.75);
+  }
   *,
   *::before {
     animation: none !important;
