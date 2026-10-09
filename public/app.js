@@ -1,3 +1,5 @@
+import { createBuzzerCustomization } from "./buzzer.js";
+
 const $ = (id) => document.getElementById(id);
 const socket = io();
 let state,
@@ -5,6 +7,7 @@ let state,
   ytReady = false,
   pendingPlay = false,
   pendingBuzz = false,
+  pendingJudgment = false,
   playlistLoading = false,
   lastVideo = "",
   toastTimeout,
@@ -29,7 +32,9 @@ const canBuzz = () =>
   inSession() &&
   !host() &&
   !state.revealed &&
-  ["playing", "buzzed"].includes(state.phase) &&
+  (state.phase === "playing" ||
+    (state.phase === "buzzed" && state.settings.recordAllBuzzes)) &&
+  !document.querySelector("dialog[open]") &&
   !myBuzz() &&
   !pendingBuzz;
 function toast(message) {
@@ -80,7 +85,11 @@ function element(tag, className, text) {
   return node;
 }
 function setPhase(id) {
-  $(id).textContent = state.revealed ? "答えを公開中" : phaseNames[state.phase];
+  $(id).textContent = state.revealed
+    ? "答えを公開中"
+    : state.phase === "buzzed" && !state.settings.recordAllBuzzes
+      ? "回答待ち"
+      : phaseNames[state.phase];
   $(id).dataset.phase = state.phase;
 }
 function roundLabel() {
@@ -144,11 +153,17 @@ if (invite) {
 }
 $("create").onclick = () => {
   const n = name();
-  if (n) send("create", { name: n, mode: $("mode").value });
+  if (n) {
+    customization.unlockAudio();
+    send("create", { name: n, mode: $("mode").value });
+  }
 };
 $("join").onclick = () => {
   const n = name();
-  if (n) send("join", { name: n, code: $("code").value });
+  if (n) {
+    customization.unlockAudio();
+    send("join", { name: n, code: $("code").value });
+  }
 };
 for (const id of ["hostLeave", "playerLeave"])
   $(id).onclick = async () => {
@@ -170,9 +185,13 @@ $("openImports").onclick = () => {
 };
 async function buzz() {
   if (!canBuzz()) return;
+  customization.unlockAudio();
   pendingBuzz = true;
   renderBuzzer();
-  await send("buzz");
+  await send("buzz", {
+    roundId: state.roundId,
+    sound: customization.preferences.sound,
+  });
   pendingBuzz = false;
   if (state && !host()) renderBuzzer();
 }
@@ -298,6 +317,107 @@ $("playlist").onclick = () => {
     }
   }, 500);
 };
+const customization = createBuzzerCustomization({
+  getRoom: () => state,
+  toast,
+});
+window.addEventListener("buzzer-preferences", () => {
+  if (state && !host()) renderBuzzer();
+});
+for (const button of document.querySelectorAll("[data-close]"))
+  button.onclick = () => $(button.dataset.close).close();
+for (const dialog of document.querySelectorAll("dialog")) {
+  dialog.addEventListener("click", (e) => {
+    const rect = dialog.getBoundingClientRect();
+    if (
+      e.target === dialog &&
+      (e.clientX < rect.left ||
+        e.clientX > rect.right ||
+        e.clientY < rect.top ||
+        e.clientY > rect.bottom)
+    )
+      dialog.close();
+  });
+  dialog.addEventListener("close", () => {
+    if (state && !host()) renderBuzzer();
+  });
+}
+const settingNames = [
+  "allowPlayerSound",
+  "recordAllBuzzes",
+  "showTimer",
+  "showScores",
+  "correctPoints",
+  "wrongPoints",
+];
+$("openRoomSettings").onclick = () => {
+  for (const key of settingNames) {
+    if ($(key).type === "checkbox") $(key).checked = state.settings[key];
+    else $(key).value = state.settings[key];
+  }
+  $("roomSettingsDialog").showModal();
+};
+$("roomSettingsForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const settings = Object.fromEntries(
+    settingNames.map((key) => [
+      key,
+      $(key).type === "checkbox" ? $(key).checked : Number($(key).value),
+    ]),
+  );
+  if (await send("settings", { settings })) {
+    $("roomSettingsDialog").close();
+    toast("ゲームの設定を反映しました");
+  }
+};
+function signed(delta) {
+  return delta > 0 ? `+${delta}` : String(delta);
+}
+function renderJudgment() {
+  const first = state.buzzes[0];
+  const eligible =
+    inSession() &&
+    !pendingJudgment &&
+    first &&
+    contestants().some((p) => p.id === first.id);
+  $("judgeCorrect").disabled = $("judgeWrong").disabled = !eligible;
+  $("judgeCorrect").setAttribute(
+    "aria-pressed",
+    String(state.judgment?.correct === true),
+  );
+  $("judgeWrong").setAttribute(
+    "aria-pressed",
+    String(state.judgment?.correct === false),
+  );
+  $("correctDelta").textContent = `${signed(state.settings.correctPoints)} PT`;
+  $("wrongDelta").textContent = `${signed(state.settings.wrongPoints)} PT`;
+  $("hostWinnerTile").dataset.judgment = state.judgment
+    ? state.judgment.correct
+      ? "correct"
+      : "wrong"
+    : "";
+  $("judgmentStatus").textContent = state.judgment
+    ? `${state.judgment.correct ? "正解" : "不正解"} · ${signed(state.judgment.delta)}点 / 判定を押し直すと修正できます。`
+    : first
+      ? "この回答者を判定してください。"
+      : "最初の回答者をここから判定できます。";
+}
+for (const [id, correct] of [
+  ["judgeCorrect", true],
+  ["judgeWrong", false],
+])
+  $(id).onclick = async () => {
+    if (!state.buzzes[0] || pendingJudgment) return;
+    pendingJudgment = true;
+    renderJudgment();
+    await send("judge", {
+      correct,
+      id: state.buzzes[0].id,
+      roundId: state.roundId,
+    });
+    pendingJudgment = false;
+    if (state && host()) renderJudgment();
+  };
 function renderHostControls() {
   const connected = inSession();
   $("start").disabled =
@@ -324,6 +444,8 @@ function renderHostControls() {
   $("reset").disabled = !connected;
   $("reveal").hidden = state.mode === "button";
   $("reveal").disabled = !connected || !state.question || state.revealed;
+  $("openRoomSettings").disabled = !connected;
+  renderJudgment();
 }
 function renderHost(s, prev) {
   $("roomCode").textContent = s.code;
@@ -345,6 +467,7 @@ function renderHost(s, prev) {
         : "問題と答えは運営用。準備ができたらスタート。";
   const first = s.buzzes[0];
   $("hostWinnerTile").dataset.active = String(!!first);
+  renderJudgment();
   $("hostWinner").textContent = first
     ? first.name
     : "最初の早押しを待っています";
@@ -385,7 +508,7 @@ function renderHost(s, prev) {
       const bottom = element("div", "score-card-bottom");
       const score = element("div", "score-value", p.score);
       score.append(element("small", "", "PT"));
-      const controls = element("div", "score-controls");
+      const controls = [];
       for (const delta of [-1, 1]) {
         const button = element("button", "", delta === 1 ? "＋" : "−");
         button.dataset.scoreId = p.id;
@@ -396,9 +519,9 @@ function renderHost(s, prev) {
         );
         button.disabled = !inSession();
         button.onclick = () => send("score", { id: p.id, delta });
-        controls.append(button);
+        controls.push(button);
       }
-      bottom.append(score, controls);
+      bottom.append(controls[0], score, controls[1]);
       card.append(top, bottom);
       return card;
     }),
@@ -432,12 +555,14 @@ function renderBuzzer() {
     : pendingBuzz
       ? "送信中…"
       : canBuzz()
-        ? "早押し！"
+        ? customization.preferences.text
         : state.revealed
           ? "答え公開中"
           : state.phase === "paused"
             ? "一時停止"
-            : "スタンバイ";
+            : state.phase === "buzzed"
+              ? "受付終了"
+              : "スタンバイ";
   $("myRank").textContent = mine ? `あなたは ${rank} 番` : "YOUR BUZZER";
   $("buzzStatus").textContent = !inSession()
     ? "接続待ち"
@@ -446,7 +571,9 @@ function renderBuzzer() {
       : state.revealed
         ? "次の問題を待っています"
         : state.phase === "buzzed"
-          ? "まだ押せます · あなたの順番も記録"
+          ? state.settings.recordAllBuzzes
+            ? "まだ押せます · 順番を記録"
+            : "今回は先着1人のみ"
           : state.phase === "playing"
             ? "わかったら、押そう！"
             : "運営の開始を待っています";
@@ -454,7 +581,9 @@ function renderBuzzer() {
 function renderPlayer(s) {
   const me = s.players.find((p) => p.id === socket.id);
   $("myName").textContent = me?.name || "プレイヤー";
-  $("myScore").textContent = me?.score || 0;
+  $("myScore").textContent = me?.score ?? "—";
+  $("timerDisplay").hidden = !s.settings.showTimer;
+  $("timerHiddenNote").hidden = s.settings.showTimer;
   $("playerProgress").textContent = roundLabel();
   $("playerRoomCode").textContent = `ROOM ${s.code}`;
   setPhase("playerPhase");
@@ -467,8 +596,13 @@ function renderPlayer(s) {
   $("playerAnswer").hidden = !s.revealed || !s.question?.answer;
   $("playerAnswer").textContent = `答え：${s.question?.answer || ""}`;
   $("playerWinner").hidden = !s.buzzes.length;
+  $("playerWinner").dataset.judgment = s.judgment
+    ? s.judgment.correct
+      ? "correct"
+      : "wrong"
+    : "";
   $("playerWinner").textContent = s.buzzes[0]
-    ? `⚡ 1番 ${s.buzzes[0].name} · ${(s.buzzes[0].ms / 1000).toFixed(3)} 秒`
+    ? `${s.judgment ? (s.judgment.correct ? "○ 正解" : "× 不正解") : "⚡ 1番"} ${s.buzzes[0].name} · ${(s.buzzes[0].ms / 1000).toFixed(3)} 秒`
     : "";
   $("playerCount").textContent = `${contestants().length} PLAYERS`;
   $("podiums").replaceChildren(
@@ -487,7 +621,7 @@ function renderPlayer(s) {
       if (p.id === socket.id)
         top.append(element("span", "self-badge", "あなた"));
       const body = element("div", "podium-body");
-      const score = element("div", "podium-score", p.score);
+      const score = element("div", "podium-score", p.score ?? "—");
       score.append(element("small", "", "PT"));
       body.append(
         element("div", "podium-avatar", Array.from(p.name)[0]),
@@ -523,6 +657,7 @@ socket.on("state", (s) => {
   const prev = state;
   state = s;
   clockOffset = s.serverNow - Date.now();
+  customization.playNewBuzzes(s, prev);
   const isHost = host();
   document.body.dataset.screen = isHost ? "host" : "player";
   $("lobby").hidden = true;

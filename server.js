@@ -22,6 +22,16 @@ export function questionsFromCsv(text) {
     .filter((q) => q.title || q.url)
     .slice(0, 500);
 }
+const defaultSettings = {
+  allowPlayerSound: true,
+  showTimer: true,
+  showScores: true,
+  recordAllBuzzes: true,
+  correctPoints: 1,
+  wrongPoints: 0,
+};
+const soundTypes = new Set(["bell", "pop", "arcade", "none"]);
+
 export function createApp() {
   const app = express();
   const http = createServer(app);
@@ -38,12 +48,15 @@ export function createApp() {
       players: [...r.players.values()].map((p) => ({
         id: p.id,
         name: p.name,
-        score: p.score,
+        score: host || r.settings.showScores ? p.score : null,
         online: p.online,
       })),
       hostId: r.hostId,
       phase: r.phase,
       round: r.round,
+      roundId: r.roundId,
+      settings: r.settings,
+      judgment: r.judgment,
       startedAt: r.startedAt,
       elapsed: r.elapsed,
       buzzes: r.buzzes,
@@ -82,6 +95,8 @@ export function createApp() {
       r.elapsed = 0;
       r.buzzes = [];
       r.revealed = false;
+      r.judgment = null;
+      r.roundId = randomBytes(8).toString("hex");
     };
     const leave = () => {
       const r = get();
@@ -115,6 +130,7 @@ export function createApp() {
         questions: [],
         index: 0,
         round: 1,
+        settings: { ...defaultSettings },
       };
       reset(r);
       r.players.set(socket.id, {
@@ -206,15 +222,25 @@ export function createApp() {
         broadcast(r);
       }
     });
-    on("buzz", () => {
+    on("buzz", ({ sound = "bell", roundId } = {}) => {
       const r = get();
       if (!r) throw Error("部屋に参加してください");
       if (r.hostId === socket.id) throw Error("運営は早押しに参加できません");
+      if (roundId && roundId !== r.roundId)
+        throw Error("ラウンドが切り替わりました");
       if (r.buzzes.some((b) => b.id === socket.id)) return;
       if (!["playing", "buzzed"].includes(r.phase) || r.revealed)
         throw Error("まだ受付していません");
+      if (r.phase === "buzzed" && !r.settings.recordAllBuzzes)
+        throw Error("このラウンドは先着1人のみです");
       const ms = Date.now() - r.startedAt;
-      r.buzzes.push({ id: socket.id, name: r.players.get(socket.id).name, ms });
+      r.buzzes.push({
+        id: socket.id,
+        name: r.players.get(socket.id).name,
+        ms,
+        sound:
+          r.settings.allowPlayerSound && soundTypes.has(sound) ? sound : "none",
+      });
       // Freeze the game clock on the first arrival, but keep collecting ranks.
       if (r.buzzes.length === 1) {
         r.elapsed = ms;
@@ -246,6 +272,45 @@ export function createApp() {
         r.phase = "paused";
       }
       r.revealed = true;
+      broadcast(r);
+    });
+    on("settings", ({ settings }) => {
+      const r = host();
+      if (!settings || typeof settings !== "object" || Array.isArray(settings))
+        throw Error("設定が不正です");
+      for (const [key, value] of Object.entries(settings)) {
+        if (!Object.hasOwn(defaultSettings, key)) throw Error("不明な設定です");
+        if (typeof defaultSettings[key] === "boolean") {
+          if (typeof value !== "boolean") throw Error("設定が不正です");
+        } else if (
+          !Number.isInteger(value) ||
+          (key === "correctPoints"
+            ? value < 0 || value > 100
+            : value < -100 || value > 0)
+        ) {
+          throw Error("正解は0〜100点、不正解は−100〜0点で設定してください");
+        }
+      }
+      Object.assign(r.settings, settings);
+      broadcast(r);
+    });
+    on("judge", ({ correct, id, roundId }) => {
+      const r = host();
+      const first = r.buzzes[0];
+      if (
+        typeof correct !== "boolean" ||
+        !first ||
+        first.id !== id ||
+        roundId !== r.roundId
+      )
+        throw Error("現在の最初の回答者を判定してください");
+      const p = r.players.get(first.id);
+      if (!p || p.id === r.hostId) throw Error("回答者が部屋にいません");
+      if (r.judgment?.correct === correct) return;
+      if (r.judgment) p.score -= r.judgment.delta;
+      const delta = correct ? r.settings.correctPoints : r.settings.wrongPoints;
+      p.score += delta;
+      r.judgment = { id: p.id, name: p.name, correct, delta };
       broadcast(r);
     });
     on("score", ({ id, delta }) => {

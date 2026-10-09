@@ -81,7 +81,8 @@
               </div>
               <div class="utility-buttons">
                 <button id="copy">招待リンク ↗</button
-                ><button id="hostLeave" class="quiet">退出</button>
+                ><button id="openRoomSettings" class="quiet">設定</button>
+                <button id="hostLeave" class="quiet">退出</button>
               </div>
             </article>
             <article class="tile question-tile">
@@ -130,6 +131,17 @@
               <div class="winner-symbol" aria-hidden="true">⚡</div>
               <h2 id="hostWinner">最初の早押しを待っています</h2>
               <span id="hostWinnerTime" class="winner-time">—</span>
+              <div class="judgment-buttons">
+                <button id="judgeCorrect" disabled aria-pressed="false">
+                  ○ 正解 <small id="correctDelta">+1 PT</small>
+                </button>
+                <button id="judgeWrong" disabled aria-pressed="false">
+                  × 不正解 <small id="wrongDelta">0 PT</small>
+                </button>
+              </div>
+              <p id="judgmentStatus" class="judgment-status">
+                最初の回答者をここから判定できます。
+              </p>
             </article>
             <article class="tile queue-tile">
               <div class="tile-heading">
@@ -223,6 +235,13 @@
               </div>
             </div>
             <div class="hud-right">
+              <button
+                id="openPlayerSettings"
+                class="quiet"
+                aria-label="ボタンと音の設定"
+              >
+                設定
+              </button>
               <div class="my-score">
                 <b id="myScore">0</b><span>POINTS</span>
               </div>
@@ -235,46 +254,242 @@
               </button>
             </div>
           </div>
-          <article class="player-stage">
-            <div class="stage-top">
-              <span id="playerPhase" class="phase" data-phase="ready"
-                >スタンバイ</span
-              ><span id="playerRoomCode" class="hint"></span>
-            </div>
-            <h1 id="playerQuestion">運営の開始を待っています</h1>
-            <p id="playerAnswer" class="player-answer" hidden></p>
-            <div id="playerTimer" class="timer">0.000</div>
-            <span class="kicker">SECONDS</span>
-            <div
-              id="playerWinner"
-              class="player-winner"
-              hidden
-              aria-live="polite"
-            ></div>
-          </article>
-          <section class="podium-section" aria-label="回答台">
-            <div class="tile-heading">
-              <h2>回答台</h2>
-              <span id="playerCount" class="hint">0 PLAYERS</span>
-            </div>
-            <div id="podiums" class="podium-grid"></div>
-          </section>
+          <div id="playerPlayfield" class="player-playfield">
+            <article class="player-stage">
+              <div class="stage-top">
+                <span id="playerPhase" class="phase" data-phase="ready"
+                  >スタンバイ</span
+                ><span id="playerRoomCode" class="hint"></span>
+              </div>
+              <h1 id="playerQuestion">運営の開始を待っています</h1>
+              <p id="playerAnswer" class="player-answer" hidden></p>
+              <div id="timerDisplay" class="timer-display">
+                <div id="playerTimer" class="timer">0.000</div>
+                <span class="kicker">SECONDS</span>
+              </div>
+              <p id="timerHiddenNote" class="hint" hidden>
+                タイマーは運営の設定で非表示です。
+              </p>
+              <div
+                id="playerWinner"
+                class="player-winner"
+                hidden
+                aria-live="polite"
+              ></div>
+            </article>
+            <section class="podium-section" aria-label="回答台">
+              <div class="tile-heading">
+                <h2>回答台</h2>
+                <span id="playerCount" class="hint">0 PLAYERS</span>
+              </div>
+              <div id="podiums" class="podium-grid"></div>
+            </section>
+          </div>
           <div id="buzzerDock" class="buzzer-dock">
             <div class="buzzer-info">
               <span id="buzzStatus" aria-live="polite">開始を待っています</span
               ><span id="myRank">YOUR BUZZER</span>
             </div>
             <button id="buzz" class="buzz" disabled>
+              <img id="buzzImage" class="custom-buzz-image" alt="" hidden />
               <span id="buzzLabel">スタンバイ</span
-              ><span class="buzz-arrow" aria-hidden="true">⚡</span>
+              ><span id="buzzIcon" class="buzz-arrow" aria-hidden="true"
+                >⚡</span
+              >
             </button>
             <span class="buzzer-help">タップ / SPACE で早押し</span>
           </div>
         </section>
       </section>
     </main>
+    <dialog
+      id="roomSettingsDialog"
+      class="settings-dialog"
+      aria-labelledby="roomSettingsTitle"
+    >
+      <form id="roomSettingsForm">
+        <div class="dialog-heading">
+          <div>
+            <span class="kicker">ROOM SETTINGS</span>
+            <h2 id="roomSettingsTitle">ゲームの設定</h2>
+          </div>
+          <button
+            type="button"
+            class="quiet"
+            data-close="roomSettingsDialog"
+            aria-label="設定を閉じる"
+          >
+            ×
+          </button>
+        </div>
+        <p class="hint">この部屋の全員に反映されます。</p>
+        <div class="settings-tile">
+          <label class="setting-row"
+            ><span
+              ><b>プレイヤーの効果音</b
+              ><small>早押しで選んだ音を鳴らすことを許可</small></span
+            ><input id="allowPlayerSound" type="checkbox"
+          /></label>
+          <label class="setting-row"
+            ><span
+              ><b>全員の押下順を記録</b
+              ><small>オフにすると先着1人で受付終了</small></span
+            ><input id="recordAllBuzzes" type="checkbox"
+          /></label>
+          <label class="setting-row"
+            ><span
+              ><b>プレイヤーにタイマーを表示</b
+              ><small>運営のタイマーは常に表示します</small></span
+            ><input id="showTimer" type="checkbox"
+          /></label>
+          <label class="setting-row"
+            ><span
+              ><b>プレイヤーに得点を表示</b
+              ><small>運営はいつでも得点を確認できます</small></span
+            ><input id="showScores" type="checkbox"
+          /></label>
+        </div>
+        <div class="settings-two-columns">
+          <label
+            >正解時の得点<input
+              id="correctPoints"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              required /></label
+          ><label
+            >不正解時の得点<input
+              id="wrongPoints"
+              type="number"
+              min="-100"
+              max="0"
+              step="1"
+              required
+          /></label>
+        </div>
+        <p class="hint">
+          判定は1回分だけ採点。正解・不正解を押し直すと、前の判定分を戻して修正します。
+        </p>
+        <button class="primary full" type="submit">
+          設定を反映する <span>↗</span>
+        </button>
+      </form>
+    </dialog>
+    <dialog
+      id="playerSettingsDialog"
+      class="settings-dialog"
+      aria-labelledby="playerSettingsTitle"
+    >
+      <div class="dialog-heading">
+        <div>
+          <span class="kicker">MY BUZZER</span>
+          <h2 id="playerSettingsTitle">ボタンと音の設定</h2>
+        </div>
+        <button
+          type="button"
+          class="quiet"
+          data-close="playerSettingsDialog"
+          aria-label="設定を閉じる"
+        >
+          ×
+        </button>
+      </div>
+      <p class="hint">見た目と音量はこの端末に自動保存されます。</p>
+      <div class="button-preview">
+        <div id="buzzPreview" class="buzz">
+          <img id="previewImage" class="custom-buzz-image" alt="" hidden /><span
+            id="previewLabel"
+            >早押し！</span
+          ><span id="previewIcon" class="buzz-arrow" aria-hidden="true"
+            >⚡</span
+          >
+        </div>
+      </div>
+      <div class="settings-two-columns">
+        <label>ボタンの文字<input id="buttonText" maxlength="12" /></label
+        ><label
+          >アイコン<select id="buttonIcon">
+            <option value="lightning">稲妻 ⚡</option>
+            <option value="star">星 ★</option>
+            <option value="music">音符 ♪</option>
+            <option value="none">なし</option>
+          </select></label
+        ><label
+          >形<select id="buttonShape">
+            <option value="pill">カプセル</option>
+            <option value="rounded">角丸タイル</option>
+            <option value="circle">丸ボタン</option>
+          </select></label
+        ><label>色<input id="buttonColor" type="color" /></label>
+      </div>
+      <label
+        >透明度 <output id="opacityValue"></output
+        ><input id="buttonOpacity" type="range" min="15" max="75" step="5"
+      /></label>
+      <label
+        >大きさ <output id="sizeValue"></output
+        ><input id="buttonSize" type="range" min="80" max="140" step="10"
+      /></label>
+      <div class="settings-two-columns">
+        <label
+          >ボタンの位置<select id="buttonPosition">
+            <option value="center">中央</option>
+            <option value="left">左</option>
+            <option value="right">右</option>
+          </select></label
+        ><label
+          >タイマーと回答台<select id="playerLayout">
+            <option value="split">左右に半分ずつ</option>
+            <option value="stacked">上下に並べる</option>
+          </select></label
+        >
+      </div>
+      <div class="settings-tile">
+        <label
+          >自分の画像をボタンにする<input
+            id="buttonImage"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+        /></label>
+        <p class="hint">
+          透過PNGも使用できます。画像はこの端末だけに保存します。500KBまで。
+        </p>
+        <button id="removeButtonImage" class="quiet" type="button">
+          画像を解除
+        </button>
+      </div>
+      <div class="settings-two-columns">
+        <label
+          >早押しの効果音<select id="buttonSound">
+            <option value="bell">ベル</option>
+            <option value="pop">ポップ</option>
+            <option value="arcade">ゲーム音</option>
+            <option value="none">鳴らさない</option>
+          </select></label
+        >
+        <div class="sound-preview">
+          <button id="testSound" type="button">音を試す ♪</button>
+        </div>
+      </div>
+      <p id="soundPermissionNote" class="hint"></p>
+      <label
+        >この端末の音量 <output id="volumeValue"></output
+        ><input id="soundVolume" type="range" min="0" max="100" step="5"
+      /></label>
+      <label class="setting-row"
+        ><span
+          ><b>効果音を聞く</b
+          ><small>自分と他のプレイヤーの早押し音</small></span
+        ><input id="hearSounds" type="checkbox"
+      /></label>
+      <button id="resetPlayerSettings" type="button" class="quiet full">
+        標準のボタンに戻す
+      </button>
+      <div class="settings-saved" role="status">変更は自動で保存されます</div>
+    </dialog>
     <div id="toast" role="status"></div>
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

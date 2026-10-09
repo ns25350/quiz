@@ -220,3 +220,148 @@ test("late buzzes keep the first timer frozen; reset clears ranks and pause bloc
   await emit(operator, "pause");
   assert.equal((await emit(second, "buzz")).ok, false);
 });
+
+async function settingsRoom(t) {
+  const { http, io } = createApp();
+  await new Promise((r) => http.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${http.address().port}`;
+  const operator = client(url),
+    a = client(url),
+    b = client(url);
+  t.after(async () => {
+    operator.disconnect();
+    a.disconnect();
+    b.disconnect();
+    await new Promise((r) => io.close(r));
+  });
+  await Promise.all(
+    [operator, a, b].map((s) => new Promise((r) => s.on("connect", r))),
+  );
+  let u = next(operator);
+  await emit(operator, "create", { name: "運営", mode: "button" });
+  const { code } = await u;
+  await emit(a, "join", { name: "あおい", code });
+  await emit(b, "join", { name: "けんた", code });
+  return { operator, a, b };
+}
+
+test(
+  "room settings enforce host permissions, privacy, sounds and first-only reception",
+  { timeout: 10000 },
+  async (t) => {
+    const { operator, a, b } = await settingsRoom(t);
+    assert.equal(
+      (await emit(a, "settings", { settings: { correctPoints: 100 } })).ok,
+      false,
+    );
+    let u = next(
+      a,
+      (s) => !s.settings.allowPlayerSound && !s.settings.showScores,
+    );
+    await emit(operator, "settings", {
+      settings: {
+        allowPlayerSound: false,
+        recordAllBuzzes: false,
+        showScores: false,
+        showTimer: false,
+      },
+    });
+    let s = await u;
+    assert.equal(s.players.find((p) => p.id === a.id).score, null);
+    assert.equal(s.settings.showTimer, false);
+    assert.equal(
+      (
+        await emit(operator, "settings", {
+          settings: { allowPlayerSound: true, correctPoints: -1 },
+        })
+      ).ok,
+      false,
+    );
+    u = next(operator, (s) => s.phase === "playing");
+    await emit(operator, "start");
+    s = await u;
+    assert.equal(s.settings.allowPlayerSound, false);
+    assert.equal(s.players.find((p) => p.id === a.id).score, 0);
+    u = next(operator, (s) => s.buzzes.length === 1);
+    await emit(a, "buzz", { sound: "arcade", roundId: s.roundId });
+    s = await u;
+    assert.equal(s.buzzes[0].sound, "none");
+    assert.equal((await emit(b, "buzz")).ok, false);
+    u = next(a, (s) => s.settings.showScores);
+    await emit(operator, "settings", {
+      settings: {
+        allowPlayerSound: true,
+        showScores: true,
+        recordAllBuzzes: true,
+      },
+    });
+    await u;
+    u = next(operator, (s) => s.buzzes.length === 2);
+    await emit(b, "buzz", { sound: "arcade" });
+    s = await u;
+    assert.equal(s.buzzes[1].sound, "arcade");
+    assert.equal(
+      (await emit(operator, "settings", { settings: { wrongPoints: 5 } })).ok,
+      false,
+    );
+    assert.equal(
+      (await emit(operator, "settings", { settings: { unknown: true } })).ok,
+      false,
+    );
+  },
+);
+
+test(
+  "judgments score the first player once, correct previous awards and reject stale rounds",
+  { timeout: 10000 },
+  async (t) => {
+    const { operator, a, b } = await settingsRoom(t);
+    await emit(operator, "settings", {
+      settings: { correctPoints: 3, wrongPoints: -2 },
+    });
+    await emit(operator, "start");
+    let u = next(operator, (s) => s.buzzes.length === 1);
+    await emit(a, "buzz");
+    let s = await u;
+    const request = { id: a.id, roundId: s.roundId, correct: true };
+    assert.equal((await emit(b, "judge", request)).ok, false);
+    assert.equal(
+      (await emit(operator, "judge", { ...request, id: b.id })).ok,
+      false,
+    );
+    u = next(operator, (s) => s.judgment?.correct);
+    await emit(operator, "judge", request);
+    s = await u;
+    assert.equal(s.players.find((p) => p.id === a.id).score, 3);
+    assert.equal((await emit(operator, "judge", request)).ok, true);
+    u = next(operator, (s) => s.players.find((p) => p.id === a.id).score === 4);
+    await emit(operator, "score", { id: a.id, delta: 1 });
+    await u;
+    u = next(operator, (s) => s.judgment?.correct === false);
+    await emit(operator, "judge", { ...request, correct: false });
+    s = await u;
+    assert.equal(s.players.find((p) => p.id === a.id).score, -1);
+    u = next(operator, (s) => s.judgment?.correct === true);
+    await emit(operator, "judge", request);
+    s = await u;
+    assert.equal(s.players.find((p) => p.id === a.id).score, 4);
+    u = next(operator, (s) => s.phase === "ready");
+    await emit(operator, "reset");
+    s = await u;
+    assert.equal(s.judgment, null);
+    assert.notEqual(s.roundId, request.roundId);
+    await emit(operator, "start");
+    u = next(operator, (s) => s.buzzes.length === 1);
+    await emit(a, "buzz");
+    s = await u;
+    assert.equal((await emit(operator, "judge", request)).ok, false);
+    assert.equal(
+      (await emit(b, "buzz", { roundId: request.roundId })).ok,
+      false,
+    );
+    u = next(operator, (s) => s.judgment?.correct);
+    await emit(operator, "judge", { ...request, roundId: s.roundId });
+    s = await u;
+    assert.equal(s.players.find((p) => p.id === a.id).score, 7);
+  },
+);
